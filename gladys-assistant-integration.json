@@ -1,177 +1,186 @@
 {
   "manifest_version": 1,
   "type": "device",
-  "name": "Demo Devices Template",
+  "name": "JUNG HOME",
   "description": {
-    "en": "Starter template showing sensors, a switch, a dimmable light and a smart plug.",
-    "fr": "Template de démarrage : capteurs, interrupteur, lampe variable et prise connectée."
+    "en": "JUNG HOME lights, covers, sockets and room thermostats, through the gateway. Unofficial.",
+    "fr": "Lumières, volets, prises et thermostats JUNG HOME, par la passerelle. Non officiel."
   },
-  "version": "1.0.0",
-  "docker_image": "ghcr.io/gladysassistant/integration-template-js:1.0.0",
+  "version": "0.1.0",
+  "docker_image": "ghcr.io/lm1lc3n7/gladys-jung-home:0.1.0",
   "gladys_version": ">=5.1.0",
-  "cover_image": "https://raw.githubusercontent.com/GladysAssistant/integration-template-js/master/cover.png",
-  "categories": ["lighting", "security", "environment"],
-  "transports": ["local", "cloud"],
+  "cover_image": "https://raw.githubusercontent.com/LM1LC3N7/gladys-jung-home/main/cover.png",
+  "categories": ["lighting", "climate"],
+  "transports": ["local"],
   "config_schema": [
     {
       "key": "intro",
       "type": "section",
-      "label": { "en": "Getting started", "fr": "Pour commencer" },
+      "label": {
+        "en": "Your JUNG HOME installation in Gladys",
+        "fr": "Votre installation JUNG HOME dans Gladys"
+      },
       "description": {
-        "en": "The demo weather station reads real data from the free Open-Meteo API: pick the coordinates to observe. No account, no API key.",
-        "fr": "La station météo de démonstration lit de vraies données via l'API gratuite Open-Meteo : choisissez les coordonnées à observer. Pas de compte, pas de clé d'API."
+        "en": "The functions of your JUNG HOME gateway are offered in the Discovery tab: lights and dimmers, roller shutters and blinds, sockets, room thermostats, rocker buttons, sensors, and your JUNG HOME scenes. Everything stays on your local network, through the local API of the gateway, with live updates. Save the address, click \"Request access\" and accept \"Gladys\" in the JUNG HOME app. Never tested with a real device yet. Unofficial, not affiliated with JUNG.",
+        "fr": "Les fonctions de votre passerelle JUNG HOME sont proposées dans l'onglet Découverte : lumières et variateurs, volets roulants et stores, prises, thermostats d'ambiance, boutons à bascule, capteurs, et vos scènes JUNG HOME. Tout reste sur votre réseau local, par l'API locale de la passerelle, avec des mises à jour en direct. Enregistrez l'adresse, cliquez sur « Demander l'accès » et acceptez « Gladys » dans l'app JUNG HOME. Jamais testé avec un vrai appareil pour l'instant. Non officiel, sans lien avec JUNG."
       },
       "links": [
         {
-          "url": "https://open-meteo.com/en/docs",
-          "label": { "en": "Open-Meteo documentation", "fr": "Documentation Open-Meteo" }
+          "url": "https://github.com/LM1LC3N7/gladys-jung-home/blob/main/docs/fr.md",
+          "label": { "en": "Guide (French)", "fr": "Guide (français)" }
+        },
+        {
+          "url": "https://github.com/LM1LC3N7/gladys-jung-home/blob/main/docs/en.md",
+          "label": { "en": "Guide (English)", "fr": "Guide (anglais)" }
         }
       ]
     },
     {
-      "key": "latitude",
-      "type": "number",
-      "label": { "en": "Latitude", "fr": "Latitude" },
+      "key": "gateway_address",
+      "type": "string",
+      "label": { "en": "Address of the gateway", "fr": "Adresse de la passerelle" },
       "description": {
-        "en": "Latitude used for the demo weather sensor.",
-        "fr": "Latitude utilisée par le capteur météo de démonstration."
+        "en": "The local IP address of your JUNG HOME gateway, like 192.168.1.30 (shown in the JUNG HOME app or in your router). The token is sent to this address only, over its pinned certificate.",
+        "fr": "L'adresse IP locale de votre passerelle JUNG HOME, par exemple 192.168.1.30 (visible dans l'app JUNG HOME ou dans votre box). Le jeton est envoyé à cette adresse seulement, sur son certificat épinglé."
       },
-      "placeholder": { "en": "e.g. 48.8566", "fr": "ex. 48.8566" },
-      "required": true,
-      "default": 48.8566,
-      "min": -90,
-      "max": 90
+      "placeholder": { "en": "192.168.1.30", "fr": "192.168.1.30" },
+      "required": true
     },
     {
-      "key": "longitude",
-      "type": "number",
-      "label": { "en": "Longitude", "fr": "Longitude" },
+      "key": "api_token",
+      "type": "secret",
+      "label": { "en": "Token of the gateway", "fr": "Jeton de la passerelle" },
       "description": {
-        "en": "Longitude used for the demo weather sensor.",
-        "fr": "Longitude utilisée par le capteur météo de démonstration."
+        "en": "Filled in by the \"Request access\" button below once you accept \"Gladys\" in the JUNG HOME app. Kept by Gladys in its database, never shown again, and sent only to the gateway at the address above.",
+        "fr": "Rempli par le bouton « Demander l'accès » ci-dessous une fois « Gladys » accepté dans l'app JUNG HOME. Gardé par Gladys dans sa base, jamais réaffiché, et envoyé seulement à la passerelle à l'adresse ci-dessus."
       },
-      "placeholder": { "en": "e.g. 2.3522", "fr": "ex. 2.3522" },
-      "required": true,
-      "default": 2.3522,
-      "min": -180,
-      "max": 180
+      "required": false
     },
     {
-      "key": "unit",
-      "type": "select",
-      "label": { "en": "Temperature unit", "fr": "Unité de température" },
+      "key": "certificate_fingerprint",
+      "type": "string",
+      "label": {
+        "en": "Certificate fingerprint (optional)",
+        "fr": "Empreinte du certificat (facultatif)"
+      },
+      "description": {
+        "en": "The SHA-256 fingerprint of the gateway certificate. Empty: learnt on your first click of \"Request access\" or \"Test the connection\", then checked on every connection (the token never goes to another certificate).",
+        "fr": "L'empreinte SHA-256 du certificat de la passerelle. Vide : apprise à votre premier clic sur « Demander l'accès » ou « Tester la connexion », puis vérifiée à chaque connexion (le jeton ne part jamais vers un autre certificat)."
+      },
+      "placeholder": { "en": "AB:CD:...", "fr": "AB:CD:..." },
       "required": false,
-      "default": "celsius",
-      "options": [
-        { "value": "celsius", "label": { "en": "Celsius", "fr": "Celsius" } },
-        { "value": "fahrenheit", "label": { "en": "Fahrenheit", "fr": "Fahrenheit" } }
-      ]
+      "default": ""
     },
     {
-      "key": "poll_frequency",
-      "type": "number",
-      "label": { "en": "Refresh interval (s)", "fr": "Intervalle de rafraîchissement (s)" },
+      "key": "live_updates",
+      "type": "boolean",
+      "label": { "en": "Live updates", "fr": "Mises à jour en direct" },
       "description": {
-        "en": "How often sensors are polled, in seconds (one minute minimum).",
-        "fr": "Fréquence d'interrogation des capteurs, en secondes (une minute minimum)."
+        "en": "Listens to the WebSocket of the gateway: the states follow within a second and the rocker presses reach your scenes. Off: the states are read at the interval below and the presses are not seen.",
+        "fr": "Écoute le WebSocket de la passerelle : les états suivent en une seconde et les appuis sur les boutons arrivent à vos scènes. Désactivé : les états sont lus à l'intervalle ci-dessous et les appuis ne sont pas vus."
       },
       "required": false,
-      "default": 300,
-      "min": 60,
+      "default": true
+    },
+    {
+      "key": "poll_interval",
+      "type": "number",
+      "label": {
+        "en": "Read interval without live updates (s)",
+        "fr": "Intervalle de lecture sans mises à jour en direct (s)"
+      },
+      "description": {
+        "en": "How often the states are read when the live updates are off or lost (30 to 3600 s). With them, every 5 minutes. Never faster, even after a restart.",
+        "fr": "Fréquence de lecture des états quand les mises à jour en direct sont désactivées ou perdues (30 à 3600 s). Avec elles, toutes les 5 minutes. Jamais plus vite, même après un redémarrage."
+      },
+      "required": false,
+      "default": 60,
+      "min": 30,
       "max": 3600
+    },
+    {
+      "key": "commands",
+      "type": "section",
+      "label": { "en": "Commands", "fr": "Commandes" },
+      "description": {
+        "en": "Turning off, stopping or closing a cover and the frost protection of a thermostat always leave, whatever the options below. A socket may feed anything (a heater, a freezer, a pump) and a \"turn everything on\" of a voice assistant or a scene reaches every switch: a socket only has \"Turn off\" until you declare it safe. Heating setpoints and JUNG HOME scenes (which may switch any socket) stay off until you allow them.",
+        "fr": "Éteindre, arrêter ou fermer un volet et le hors gel d'un thermostat partent toujours, quelles que soient les options ci-dessous. Une prise peut alimenter n'importe quoi (un radiateur, un congélateur, une pompe) et un « allume tout » d'un assistant vocal ou d'une scène atteint chaque interrupteur : une prise n'a que « Éteindre » tant que vous ne la déclarez pas sûre. Les consignes de chauffage et les scènes JUNG HOME (qui peuvent commander n'importe quelle prise) restent désactivées tant que vous ne les autorisez pas."
+      }
+    },
+    {
+      "key": "safe_sockets",
+      "type": "string",
+      "label": { "en": "Sockets declared safe", "fr": "Prises déclarées sûres" },
+      "description": {
+        "en": "The function ids of the sockets that may be turned on at any time (parameter JUNG_FUNCTION in the Discovery tab), separated by commas. They become switches after a new Scan. Only sockets of a lamp or of a device that may start at any time.",
+        "fr": "Les identifiants de fonction des prises qu'on peut allumer à tout moment (paramètre JUNG_FUNCTION dans l'onglet Découverte), séparés par des virgules. Elles deviennent des interrupteurs après un nouveau Scan. Seulement des prises de lampe ou d'appareil qui peut démarrer à tout moment."
+      },
+      "placeholder": { "en": "id0a1b2c3d4e5f607", "fr": "id0a1b2c3d4e5f607" },
+      "required": false,
+      "default": ""
+    },
+    {
+      "key": "allow_heating_setpoints",
+      "type": "boolean",
+      "label": {
+        "en": "Allow heating setpoints",
+        "fr": "Autoriser les consignes de chauffage"
+      },
+      "description": {
+        "en": "Off by default: the setpoints of the room thermostats are read only (the frost protection still leaves). On: Gladys may set them, between 5 and 30 °C.",
+        "fr": "Désactivé par défaut : les consignes des thermostats d'ambiance sont en lecture seule (le hors gel part quand même). Activé : Gladys peut les régler, entre 5 et 30 °C."
+      },
+      "required": false,
+      "default": false
+    },
+    {
+      "key": "allow_scenes",
+      "type": "boolean",
+      "label": { "en": "Allow JUNG HOME scenes", "fr": "Autoriser les scènes JUNG HOME" },
+      "description": {
+        "en": "Off by default: a JUNG HOME scene may turn on any socket, safe or not. On: their \"Recall\" button runs them, from the dashboard and the scenes of Gladys.",
+        "fr": "Désactivé par défaut : une scène JUNG HOME peut allumer n'importe quelle prise, sûre ou non. Activé : leur bouton « Lancer » les exécute, depuis le tableau de bord et les scènes de Gladys."
+      },
+      "required": false,
+      "default": false
+    },
+    {
+      "key": "language",
+      "type": "select",
+      "label": {
+        "en": "Language of the feature names",
+        "fr": "Langue des noms des fonctionnalités"
+      },
+      "description": {
+        "en": "Used for the names of the features of the devices added from now on, and for the refusals.",
+        "fr": "Sert aux noms des fonctionnalités des appareils ajoutés désormais, et aux refus."
+      },
+      "required": false,
+      "default": "fr",
+      "options": [
+        { "value": "fr", "label": { "en": "French", "fr": "Français" } },
+        { "value": "en", "label": { "en": "English", "fr": "Anglais" } }
+      ]
     }
   ],
   "actions": [
     {
-      "key": "test_weather",
-      "label": { "en": "Test the weather provider", "fr": "Tester le fournisseur météo" },
+      "key": "request_access",
+      "label": { "en": "Request access", "fr": "Demander l'accès" },
       "timeout_seconds": 30
     },
     {
-      "key": "identify",
-      "label": { "en": "Identify a device", "fr": "Identifier un appareil" },
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Device", "fr": "Appareil" },
-          "required": true
-        }
-      ]
-    }
-  ],
-  "scene_triggers": [
+      "key": "test_connection",
+      "label": { "en": "Test the connection", "fr": "Tester la connexion" },
+      "timeout_seconds": 60
+    },
     {
-      "key": "motion_detected",
-      "label": { "en": "Motion detected", "fr": "Mouvement détecté" },
-      "description": {
-        "en": "A demo motion sensor saw a person or an animal move.",
-        "fr": "Un détecteur de démonstration a vu bouger une personne ou un animal."
+      "key": "trust_certificate",
+      "label": {
+        "en": "Trust the new certificate",
+        "fr": "Faire confiance au nouveau certificat"
       },
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Sensor", "fr": "Détecteur" }
-        },
-        {
-          "key": "target",
-          "type": "multi_select",
-          "label": { "en": "What moved", "fr": "Ce qui a bougé" },
-          "options": [
-            { "value": "person", "label": { "en": "Person", "fr": "Personne" } },
-            { "value": "animal", "label": { "en": "Animal", "fr": "Animal" } }
-          ]
-        }
-      ],
-      "variables": [
-        {
-          "key": "target",
-          "type": "string",
-          "label": { "en": "What moved", "fr": "Ce qui a bougé" }
-        }
-      ]
-    }
-  ],
-  "scene_actions": [
-    {
-      "key": "identify_device",
-      "label": { "en": "Identify a device", "fr": "Identifier un appareil" },
-      "description": {
-        "en": "Make a device signal itself (the demo light blinks).",
-        "fr": "Fait se signaler un appareil (la lampe de démonstration clignote)."
-      },
-      "timeout_seconds": 15,
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Device", "fr": "Appareil" },
-          "required": true
-        }
-      ],
-      "outputs": [
-        {
-          "key": "signalled",
-          "type": "boolean",
-          "label": { "en": "Device signalled", "fr": "Appareil signalé" }
-        }
-      ]
-    }
-  ],
-  "widgets": [
-    {
-      "key": "demo_status",
-      "label": { "en": "Demo status", "fr": "État de la démo" },
-      "description": {
-        "en": "Live temperature and plug power, plug connection and observed location.",
-        "fr": "Température et puissance en direct, connexion de la prise, position observée."
-      },
-      "icon": "activity",
-      "action_timeout_seconds": 15
+      "timeout_seconds": 30
     }
   ]
 }

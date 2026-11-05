@@ -8,69 +8,79 @@ contributors.
 A Gladys Assistant **external integration**: a Node.js service (Node 22+, ESM,
 no build step) that runs in its own sandboxed Docker container and talks to
 Gladys through
-[`@gladysassistant/integration-sdk`](https://github.com/GladysAssistant/integration-sdk-js),
-its only runtime dependency. It started from the official JavaScript template.
+[`@gladysassistant/integration-sdk`](https://github.com/GladysAssistant/integration-sdk-js).
+It bridges a JUNG HOME gateway through its local REST API and WebSocket
+(protocol from the junghome reference, MIT). Runtime dependencies: the SDK and
+`ws`.
 
 ## Commands
 
 ```bash
 npm install
-npm test                                  # node --test, the built-in runner
-node --test test/devices.test.js          # one file
-node --test --test-name-pattern "plug"    # tests whose name matches
+gi test                                   # or npm test (node --test --test-timeout=60000)
+node --test test/commands.test.js         # one file (through memcap on the dev VM)
 npm run lint                              # ESLint
 npm run format:check                      # Prettier, as the CI runs it
-npm run format                            # Prettier, fix in place
+npm run cover                             # cover.png (800x534), plain Node
 npx github:GladysAssistant/integration-store .   # store admission checks
 ```
-
-The CI (`.github/workflows/ci.yml`) runs `format:check`, `lint` and `test` on
-Node 22 and 24, and builds the Docker image: run the three commands before
-pushing.
 
 ## Architecture
 
 ```
-index.js                          SDK wiring only: handlers registered before connect()
-src/devices/index.js              registry of the device blueprints + dispatch helpers
-src/devices/<type>.js             one device type per file (buildDevice, onPoll, onSetValue...)
-src/scenes.js                     scene action handlers (manifest `scene_actions`)
-src/widgets.js                    dashboard widget handlers (manifest `widgets`)
-src/config.js                     DEFAULT_CONFIG (mirrors the manifest defaults) + normalization
-src/weather.js                    example driver (Open-Meteo)
-gladys-assistant-integration.json manifest: name, config_schema, actions, image...
-docs/en.md, docs/fr.md            user documentation, re-hosted by Gladys (mandatory)
-test/                             node --test, against the SDK's fake Gladys (integration-sdk/testing)
-.github/scripts/release.mjs       release helpers (manifest bump, changelog), tested in test/
+index.js                          SDK wiring only (src/handlers.js registers before connect())
+src/app.js                        JungHomeApp: lifecycle, reads, live, commands, stops, buttons
+src/gateway.js                    REST client on a pinned TLS socket, answers, registration
+src/live.js                       wss://<gateway>/ws on the pinned socket, frames (bounded)
+src/model.js                      functions -> Gladys devices, readers, writers (pure)
+src/store.js                      /data: pins, identity, refused-token mark, pause, kept stops
+src/publisher.js                  states within 300/min, rocker presses as events
+src/config.js                     DEFAULT_CONFIG (mirrors the manifest) + normalization
+src/i18n.js                       texts in English and French
+test/helpers/fakeGateway.js       simulated gateway (HTTPS + WebSocket) on 127.0.0.1
+test/kit/                         parts of gladys-testkit (clocks, certificates)
 ```
+
+## Safety rules of this integration
+
+- **Stops are never held back**: switch off (lights, sockets, brightness 0),
+  cover stop and close, frost protection. Not by an option, a bound, a 429
+  pause, a read or a command in flight, a full queue, an identity not read
+  again, nor a slow /data (never awaited on their path). They wait only for
+  what the token needs (a token, its acceptance, a pinned certificate) and are
+  then kept and sent first. A switch-off or a frost protection stays kept (in
+  /data) until a read started after the gateway's answer shows it applied; at
+  most 4 answered sends per run; a newer command taken by the gateway lifts it.
+- **Nothing sent before a stop leaves after it**: every command checks the
+  stop count of its target right before its first byte (`beforeSend`).
+- **A read started before a command never applies to its target after it**
+  (marks given when a request leaves).
+- Other commands leave within 3.5 s or not at all, every check (option, token,
+  pause, identity) done again in `beforeSend`.
+- Sockets are never a switch unless declared safe; heating setpoints and
+  JUNG HOME scenes are off by default; setpoints bounded 5 to 30 °C.
+- The token goes only to the configured address, on a connection whose
+  certificate is the pinned one, checked before the first byte; never logged,
+  never in /data, a status nor an error. A changed certificate is never
+  learnt alone.
+- A refused token is kept (6-bit salted mark in /data), never tried again
+  until a new token or the Test button.
+- /data unreadable is never taken for empty (nothing learnt or written over it).
+- Clocks: monotonic for every decision; wall time only for /data.
 
 ## Rules
 
-- **External ids are forever.** Build them with
-  `gladys.externalIds(type, platformId)`, `platformId` being the unique id the
-  platform gives the device (serial, cloud id, MAC), never a label. Gladys keys
-  devices, their history, scenes and dashboards on them: changing one creates a
-  new device and orphans the old one. The same goes for every key users store:
-  manifest `config_schema`, `actions`, widget and scene keys, feature keys.
-- **The container rootfs is read-only.** Write only under `/data`, the one
-  writable volume. Never log tokens, passwords or API keys.
-- **Versions belong to the Release workflow** (Actions → Release). Never edit
-  `version` in `package.json` or in the manifest, nor the `docker_image` tag,
-  by hand — except on the README's hand-pushed tag path, which bumps all three
-  together before tagging. `test/manifest.test.js` checks they agree.
-- **Changelog.** Every user-visible change adds a line under `## [Unreleased]`
-  in `CHANGELOG.md` (`### Added`, `Changed`, `Fixed`, `Removed`, `Security`).
-  Never write a version heading: the Release workflow moves the section, and it
-  becomes the notes of the GitHub Release.
-- **Manifest.** Texts are multi-language objects `{ "en": ..., "fr": ... }`:
-  `label`, `description` and `placeholder` alike, never a plain string. The
-  catalog `description` holds 10 to 100 characters per language. A field the
-  older cores do not know needs a higher `gladys_version` minimum
-  (`categories`: 4.86.0; `widgets`, `scene_triggers`, `scene_actions`,
-  `type: "provider"`: 5.1.0). `test/manifest.test.js` ties the manifest to the
-  code (defaults, action, scene and widget handlers): change both sides
-  together.
-- **User-facing text** is bilingual (English and French): action messages,
-  manifest texts, and `docs/en.md` / `docs/fr.md`, kept in sync.
-- **Style.** Prettier formats, ESLint catches mistakes. Comments explain why,
-  in English. Tests never touch the network.
+- **External ids are forever**: `function:<sn serial | mac MAC>_<function id>`
+  and `scene:<...>_<scene id>`, built with `gladys.externalIds`. Changing one
+  orphans the user's devices. The same goes for the manifest keys and the
+  feature keys (`on`, `brightness`, `state`, `position`, `setpoint`, `frost`,
+  `off`, `press_up`, `press_down`, `q<suffix>`, `recall`).
+- **A device published again never loses a feature** (`app.publishDevices`).
+- **The container rootfs is read-only**: write only under `/data`.
+- **Versions belong to the Release workflow**; `test/manifest.test.js` checks
+  that package.json, the lock and the manifest agree.
+- **Changelog**: every user-visible change under `## [Unreleased]`.
+- **User-facing text** is bilingual (English and French), docs in sync with
+  the code.
+- **Tests never touch the network** beyond 127.0.0.1; every wait is bounded
+  (a test fails, it never hangs).

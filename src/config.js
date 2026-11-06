@@ -65,6 +65,7 @@ export function parseAddress(raw) {
     return { error: 'local-name' };
   }
   const port = url.port ? Number(url.port) : DEFAULT_PORT;
+  if (!(port >= 1 && port <= 65535)) return { error: 'invalid' };
   const shown = host.includes(':') ? `[${host}]` : host;
   return { host, port, key: `${shown}:${port}` };
 }

@@ -92,6 +92,10 @@ const FAILURES = {
 const GUARD_STATES = {
   waiting: both('waiting', 'en attente'),
   noToken: both('waiting for a token', 'en attente d’un jeton'),
+  authRoute: both(
+    'refused on its route (401/403), sent again every 5 s',
+    'refusé sur sa route (401/403), renvoyé toutes les 5 s',
+  ),
   tokenRefused: both(
     'waiting: token refused, leaves as soon as a new one is saved or the Test succeeds',
     'en attente : jeton refusé, part dès qu’un nouveau est enregistré ou que le test réussit',
@@ -110,6 +114,10 @@ const GUARD_STATES = {
   applied: both('applied', 'appliqué'),
   done: both('taken by the gateway', 'pris par la passerelle'),
   unknown: both('unknown on the gateway', 'inconnu de la passerelle'),
+  changedElsewhere: both(
+    'dropped: opened elsewhere meanwhile',
+    'abandonnée : ouvert ailleurs entre-temps',
+  ),
 };
 
 const MAX_STATUS = 900;
@@ -246,6 +254,10 @@ export const T = {
       'Token refused by the gateway: nothing sent.',
       'Jeton refusé par la passerelle : rien envoyé.',
     ),
+    authRoute: both(
+      'Refused by the gateway (401/403 on this route): the token is checked again at the next read.',
+      'Refusée par la passerelle (401/403 sur cette route) : le jeton est revérifié à la prochaine lecture.',
+    ),
     paused: both(
       'Paused after a 429 of the gateway: nothing sent.',
       'En pause après un 429 de la passerelle : rien envoyé.',
@@ -309,6 +321,16 @@ export const T = {
       ),
   },
   register: {
+    failed: (err) =>
+      err?.kind === 'refused'
+        ? both(
+            'The access request ended without approval in the JUNG HOME app (3 minutes).',
+            "La demande d'accès s'est terminée sans accord dans l'app JUNG HOME (3 minutes).",
+          )
+        : both(
+            `The access request failed: ${word(FAILURES[err?.kind] ?? both('error', 'erreur'), 'en')}.`,
+            `La demande d'accès a échoué : ${word(FAILURES[err?.kind] ?? both('error', 'erreur'), 'fr')}.`,
+          ),
     busy: both(
       'An access request is already waiting for your approval in the JUNG HOME app.',
       "Une demande d'accès attend déjà votre accord dans l'app JUNG HOME.",
@@ -320,6 +342,11 @@ export const T = {
       ),
   },
   test: {
+    waiting: (status, s, pin, learnt) =>
+      both(
+        `${learnt ? `Certificate pinned (SHA-256 ${pin}). ` : ''}${status.en} Not read again before the interval: next test possible in ${s} s.`,
+        `${learnt ? `Certificat épinglé (SHA-256 ${pin}). ` : ''}${status.fr} Pas de nouvelle lecture avant l'intervalle : prochain test possible dans ${s} s.`,
+      ),
     noToken: (pin, learnt) =>
       both(
         `Gateway reached${learnt ? `, certificate pinned (SHA-256 ${pin})` : ''}. No token yet: click "Request access".`,

@@ -66,6 +66,8 @@ export const TIMINGS = {
   livePong: 15_000,
   liveRetryMin: 5000,
   liveRetryMax: 5 * 60_000,
+  /** A secondary route (scenes, socket) refused or failing: tried again doubling up to this. */
+  secondaryMax: 3600_000,
   liveStable: 60_000,
   /** getConfig() failed: tried again after these, then every minute, without end. */
   configRetry: [5000, 15_000, 30_000, 60_000],

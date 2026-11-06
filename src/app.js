@@ -36,6 +36,7 @@ import {
   buildModel,
   datapointOf,
   emptyModel,
+  numberOf,
   functionsOf,
   pressOf,
   scenesOf,
@@ -126,6 +127,8 @@ export class JungHomeApp {
     this.liveFailures = 0;
     this.liveOpenedAt = undefined;
     this.liveMark = 0;
+    this.scenesDue = -Infinity;
+    this.scenesFailures = 0;
     this.presses = new Map();
     // Commands and stops.
     this.counter = 0;
@@ -189,6 +192,12 @@ export class JungHomeApp {
     }
     const left = (this.memory.pausedUntil ?? 0) - this.now();
     if (left > 0) this.pauseEnd = this.mono() + Math.min(left, TIMINGS.rateLimitMax);
+    // The last read of a previous run paces Scan and Test too (written at most
+    // once a minute: it may have been up to a minute later than kept).
+    if (this.memory.lastReadAt !== null) {
+      const ago = Math.max(0, this.now() - this.memory.lastReadAt - TIMINGS.attemptWriteEvery);
+      this.lastReadMono = Math.max(this.lastReadMono, this.mono() - ago);
+    }
   }
 
   /** Writes /data in the background (never awaited on a command path). */
@@ -484,7 +493,8 @@ export class JungHomeApp {
       const serial = await client.serial({ timeout: TIMINGS.readTimeout });
       if (typeof serial === 'string' && SERIAL.test(serial.trim())) seen = `sn${serial.trim()}`;
     } catch (err) {
-      if (err?.kind === 'auth' || err?.kind === 'rate' || err?.kind === 'pin') throw err;
+      // A 401/403 here is not a refused token (only the function list says so).
+      if (err?.kind === 'rate' || err?.kind === 'pin') throw err;
       if (err?.kind === 'notfound') mac = true;
     }
     if (!seen && mac) {
@@ -493,7 +503,7 @@ export class JungHomeApp {
         const hex = typeof raw === 'string' ? raw.toLowerCase().replace(/[:-]/g, '') : '';
         if (/^[0-9a-f]{12}$/.test(hex) && hex !== '000000000000') seen = `mac${hex}`;
       } catch (err) {
-        if (err?.kind === 'auth' || err?.kind === 'rate' || err?.kind === 'pin') throw err;
+        if (err?.kind === 'rate' || err?.kind === 'pin') throw err;
       }
     }
     if (!this.current(generation)) return;
@@ -583,6 +593,7 @@ export class JungHomeApp {
     }
     this.reading = true;
     const client = this.sessionClient();
+    const previousRead = this.lastReadMono;
     this.noteAttempt();
     const startMark = ++this.counter;
     try {
@@ -592,12 +603,21 @@ export class JungHomeApp {
       if (!this.current(generation)) return;
       if (!Array.isArray(list)) throw new GatewayError('format', 'the function list is not a list');
       let scenes = this.scenes;
-      try {
-        scenes = scenesOf(await client.scenes({ timeout: TIMINGS.readTimeout }));
-      } catch (err) {
-        // A secondary list: its failure never stops the values (auth and 429 aside).
-        if (err?.kind === 'auth' || err?.kind === 'rate') throw err;
-        this.logger.debug?.(`JUNG HOME: scenes not read (${err?.message})`);
+      if (this.mono() >= this.scenesDue) {
+        try {
+          scenes = scenesOf(await client.scenes({ timeout: TIMINGS.readTimeout }));
+          this.scenesFailures = 0;
+          this.scenesDue = -Infinity;
+        } catch (err) {
+          // A secondary list: never stops the values, never a refused token
+          // (401/403 here: "not read", spaced, doubling up to 1 h). 429 pauses.
+          if (err?.kind === 'rate') throw err;
+          this.scenesFailures += 1;
+          this.scenesDue =
+            this.mono() +
+            Math.min(TIMINGS.secondaryMax, TIMINGS.retryMin * 2 ** (this.scenesFailures - 1));
+          this.logger.debug?.(`JUNG HOME: scenes not read (${err?.message})`);
+        }
       }
       if (!this.current(generation)) return;
       this.scenes = scenes;
@@ -616,6 +636,9 @@ export class JungHomeApp {
       await this.showStatus();
       await this.publishAllTransports();
     } catch (err) {
+      // A certificate refused at the handshake: nothing reached the gateway,
+      // so it does not count as a read (the pace starts from the last real one).
+      if (err?.kind === 'pin' || err?.kind === 'nopin') this.lastReadMono = previousRead;
       if (this.current(generation)) await this.fail(generation, err);
       return;
     } finally {
@@ -684,13 +707,14 @@ export class JungHomeApp {
     if (this.current(generation)) this.scheduleRead(generation, delay);
   }
 
-  /** A read that failed on a side path: a 429 pauses, a refused token blocks. */
+  /**
+   * A request that failed on a side path (read back, command, scene): a 429
+   * pauses. A 401/403 there is never a refused token: only the function list
+   * decides, so its next read is brought forward (never sooner than allowed).
+   */
   sideError(err) {
     if (err?.kind === 'rate') this.pause(err);
-    else if (err?.kind === 'auth') {
-      this.refuseToken();
-      this.background(this.showStatus());
-    }
+    else if (err?.kind === 'auth') this.logger.debug?.('JUNG HOME: 401/403 on a side route');
   }
 
   /** The function list (read or live): model, Discovery, states. */
@@ -744,9 +768,10 @@ export class JungHomeApp {
     const state = pressOf(dp);
     if (state === undefined) return;
     const now = this.mono();
+    // The window counts from the last press kept (the click), not from a copy.
     const last = this.presses.get(button.fid);
-    this.presses.set(button.fid, now);
     if (last !== undefined && now - last < TIMINGS.pressCopyWindow) return;
+    this.presses.set(button.fid, now);
     if (this.created.has(button.featureId)) this.publisher.pushEvent(button.featureId, { state });
   }
 
@@ -792,10 +817,8 @@ export class JungHomeApp {
       })
       .catch((err) => {
         if (!this.current(generation)) return;
-        if (err?.kind === 'auth') {
-          this.background(this.fail(generation, err));
-          return;
-        }
+        // A 401/403 on the socket is not a refused token: the socket is lost,
+        // tried again later (doubling up to 1 h); the reads go on.
         if (err?.kind === 'rate') this.pause(err);
         this.liveLost(generation, err);
       });
@@ -809,10 +832,8 @@ export class JungHomeApp {
     this.liveOpenedAt = undefined;
     this.liveState = 'down';
     this.liveFailures += 1;
-    const delay = Math.min(
-      TIMINGS.liveRetryMax,
-      TIMINGS.liveRetryMin * 2 ** (this.liveFailures - 1),
-    );
+    const max = err?.kind === 'auth' ? TIMINGS.secondaryMax : TIMINGS.liveRetryMax;
+    const delay = Math.min(max, TIMINGS.liveRetryMin * 2 ** (this.liveFailures - 1));
     if (this.liveFailures <= 3 || this.liveFailures % 20 === 0) {
       this.logger.warn(
         `JUNG HOME: live updates lost (${err?.message ?? err}); socket again in ${Math.round(delay / 1000)} s`,
@@ -948,8 +969,10 @@ export class JungHomeApp {
     const parts = [];
     let connected = false;
     if (c.error) parts.push(T.configError(c.error));
-    else if (!c.token) parts.push(T.noToken);
-    else if (this.pinError?.kind === 'pin') parts.push(T.pinChanged(this.pinError.fingerprint));
+    else if (!c.token) {
+      if (this.registerError) parts.push(T.register.failed(this.registerError));
+      parts.push(T.noToken);
+    } else if (this.pinError?.kind === 'pin') parts.push(T.pinChanged(this.pinError.fingerprint));
     else if (!this.pin()) parts.push(T.noPin);
     else if (this.blocked) parts.push(T.tokenRefused);
     else if (this.paused()) parts.push(T.paused(Math.ceil(this.pauseLeft() / 60_000)));
@@ -1184,7 +1207,7 @@ export class JungHomeApp {
       if (err instanceof Refusal) throw err;
       if (!err?.sent) throw this.refusal('notSent', err?.message ?? 'error');
       this.sideError(err);
-      if (err.kind === 'auth') throw this.refusal('tokenRefused');
+      if (err.kind === 'auth') throw this.refusal('authRoute');
       if (err.kind === 'rate') throw this.refusal('paused');
       if (err.answered && ['refused', 'notfound', 'redirect'].includes(err.kind)) {
         throw this.refusal('refused', err.message);
@@ -1320,7 +1343,20 @@ export class JungHomeApp {
       stuck: false,
       reason: undefined,
       state: 'waiting',
+      // A cover close: the level known when it was clicked (undefined: unknown,
+      // never "changed elsewhere"), and the reads in a row showing it opened since.
+      close: op.kind === 'move' && op.key === 'level' && op.value === '100',
+      before: undefined,
+      changed: 0,
+      needRead: false,
+      reading: false,
     };
+  }
+
+  /** The level of a cover as last known (read or pushed), as a number, or undefined. */
+  knownLevel(fid, dpid) {
+    const level = numberOf(this.functions.get(fid)?.datapoints.get(dpid)?.values.get('level'));
+    return Number.isInteger(level) && level >= 0 && level <= 100 ? level : undefined;
   }
 
   /**
@@ -1336,6 +1372,7 @@ export class JungHomeApp {
     this.stopCount += 1;
     const key = this.guardKey(address, op.fid);
     const guard = this.newGuard(op, address);
+    if (guard.close) guard.before = this.knownLevel(op.fid, op.dpid);
     this.guards.set(key, guard);
     // Kept first (not awaited: a slow /data never holds a stop).
     if (guard.kind === 'state') this.persistGuards();
@@ -1391,12 +1428,15 @@ export class JungHomeApp {
         const outcome = await this.sendGuardOnce(guard);
         if (outcome !== 'unanswered') return;
       }
+      // A close that did not reach the gateway is sent again only after a read
+      // (the cover may have been opened by hand meanwhile).
+      if (guard.close) guard.needRead = true;
     })().finally(() => {
       guard.inFlight = undefined;
       const again = guard.again;
       guard.again = false;
       // Asked again meanwhile (a flush, a new token): once more, unless taken.
-      if (again && !guard.ok) this.sendGuard(guard);
+      if (again && !guard.ok) this.retryGuard(guard);
     });
     return guard.inFlight;
   }
@@ -1451,10 +1491,11 @@ export class JungHomeApp {
   guardFailed(guard, err) {
     const kind = err?.kind;
     if (kind === 'auth') {
-      this.refuseToken();
-      guard.state = 'tokenRefused';
+      // Not a refused token (only the function list says so): not counted,
+      // kept, sent again at the stop pace.
+      guard.state = 'authRoute';
       this.background(this.showStatus());
-      return 'blocked';
+      return 'refusedRoute';
     }
     if (kind === 'pin') {
       this.pinError = err;
@@ -1540,8 +1581,8 @@ export class JungHomeApp {
         }),
         guard.fid,
       );
-    } catch (err) {
-      if (err?.kind === 'auth') this.refuseToken();
+    } catch {
+      // Not read (any cause, 401/403 included): the stop timer reads again.
       return;
     }
     if (dp && guard.address === this.config.address) this.applyDatapoint(dp, readMark);
@@ -1576,10 +1617,64 @@ export class JungHomeApp {
     }
     if (!guard.ok) {
       // Never taken by the gateway, or contradicted: sent (refusals counted, at most 4).
-      if (guard.state !== 'refused' || guard.answered < LIMITS.stopSends) this.sendGuard(guard);
+      if (guard.state !== 'refused' || guard.answered < LIMITS.stopSends) this.retryGuard(guard);
       return;
     }
     if (!guard.stuck) this.background(this.confirmGuard(guard));
+  }
+
+  retryGuard(guard) {
+    if (guard.close && guard.needRead) this.background(this.checkClose(guard));
+    else this.sendGuard(guard);
+  }
+
+  /**
+   * A close that did not reach the gateway, before it is sent again: the level
+   * is read. Closed: done. Closer than when clicked: moving, taken. More open
+   * than when clicked in two reads in a row: opened elsewhere, the close is
+   * dropped (never re-closed over a hand opening). Otherwise sent again. A
+   * read that fails sends nothing (the next tick reads again).
+   */
+  async checkClose(guard) {
+    if (guard.reading || guard.inFlight || !this.guardSendable(guard)) return;
+    guard.reading = true;
+    let level;
+    try {
+      const dp = datapointOf(
+        await this.stopClient(guard).datapoint(guard.fid, guard.dpid, {
+          timeout: TIMINGS.readTimeout,
+        }),
+        guard.fid,
+      );
+      const n = numberOf(dp?.values.get('level'));
+      level = Number.isInteger(n) && n >= 0 && n <= 100 ? n : undefined;
+    } catch {
+      return;
+    } finally {
+      guard.reading = false;
+    }
+    if (this.guards.get(this.guardKey(guard.address, guard.fid)) !== guard) return;
+    if (level === 100) {
+      guard.state = 'applied';
+      this.dropGuard(guard);
+      return;
+    }
+    if (guard.before !== undefined && level !== undefined && level > guard.before) {
+      guard.state = 'done';
+      this.dropGuard(guard);
+      return;
+    }
+    if (guard.before !== undefined && level !== undefined && level < guard.before) {
+      guard.changed += 1;
+      if (guard.changed >= 2) {
+        guard.state = 'changedElsewhere';
+        this.logger.info(`JUNG HOME: close of ${guard.fid} dropped: opened elsewhere meanwhile`);
+        this.dropGuard(guard);
+      }
+      return;
+    }
+    guard.changed = 0;
+    this.sendGuard(guard);
   }
 
   /** While a stop is not done, it is worked on every 5 s, without end (no age limit). */
@@ -1653,6 +1748,7 @@ export class JungHomeApp {
     } catch (err) {
       return T.failure(err);
     }
+    this.registerError = undefined;
     this.registerAbort = new AbortController();
     this.registering = this.registerToken({
       host: target.host,
@@ -1673,7 +1769,10 @@ export class JungHomeApp {
       })
       .catch((err) => {
         this.logger.warn(`JUNG HOME: access request ended (${err?.message ?? 'error'})`);
+        // Said in the status until the next click (a 400 is the end of the 3 minutes).
         this.registerError = err;
+        this.lastStatus = undefined;
+        this.background(this.showStatus());
       })
       .finally(() => {
         this.registering = undefined;
@@ -1707,6 +1806,8 @@ export class JungHomeApp {
         if (r.error) return r.error;
         pin = r.fp;
         learnt = true;
+        // The stops kept for want of a pin leave first, before the test reads.
+        this.flushGuards();
       }
       const client = createGateway({
         host: c.host,
@@ -1715,8 +1816,22 @@ export class JungHomeApp {
         token: c.token,
         request: this.request,
       });
+      if (!c.token) {
+        await client.version({ timeout: TIMINGS.readTimeout });
+        return T.test.noToken(pin, learnt);
+      }
+      // Never a read sooner than the interval after the last one (this run or,
+      // from /data, the previous one): the last result is said instead.
+      const wait = this.lastReadMono + c.pollInterval * 1000 - this.mono();
+      if (wait > 0) {
+        const { message } = this.statusText();
+        return T.test.waiting(message, Math.ceil(wait / 1000), pin, learnt);
+      }
+      this.noteAttempt();
       const version = await client.version({ timeout: TIMINGS.readTimeout });
-      if (!c.token) return T.test.noToken(pin, learnt);
+      // The token is accepted only on an answer of the function list (2xx).
+      const list = await client.functions({ timeout: TIMINGS.readTimeout });
+      if (!Array.isArray(list)) throw new GatewayError('format', 'the function list is not a list');
       const identity = { ...this.identity };
       await this.readIdentity(client, this.generation);
       const seen = this.identity;

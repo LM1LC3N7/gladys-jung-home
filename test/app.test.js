@@ -229,8 +229,9 @@ test('identity: learnt once, a weaker or missing answer is unreadable, another s
   ack = await s.fire('idlight1', 'on', 0);
   assert.equal(ack.success, true, ack.error);
   assert.equal(s.gw.value('idlight1-001', 'switch'), '0');
-  // The Test button accepts it.
+  // The Test button accepts it (once the interval after the last read is over).
   s.app.lastTest = undefined;
+  await s.advance(61_000);
   await within(s.app.testConnection(), 'test');
   assert.equal(s.store.data.identities[s.gw.address], 'snJH9999');
 });
@@ -293,7 +294,8 @@ test('the first certificate is pinned on a click only; an unreadable /data never
   result = await within(s.app.testConnection(), 'test');
   assert.match(result.en, /certificate pinned/);
   assert.equal(s.store.data.pins[s.gw.address], s.gw.fingerprint);
-  await s.advance(1000);
+  // The test read counts: the session's first read waits for the interval.
+  await s.advance(61_000);
   await s.online();
 });
 

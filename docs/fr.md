@@ -73,8 +73,13 @@ statut le dit) puis envoyé dès que possible :
   qu'un nouveau jeton est enregistré ou que « Tester la connexion » réussit ;
 - pas de certificat épinglé, ou certificat changé : il part dès que le
   certificat est épinglé ou de nouveau reconnu ;
-- passerelle injoignable : il est renvoyé toutes les 5 secondes, sans limite
-  de durée.
+- passerelle injoignable, ou route refusée (401/403) alors que la liste des
+  fonctions accepte encore le jeton : il est renvoyé toutes les 5 secondes,
+  sans limite de durée (seul un refus de la liste des fonctions vaut jeton
+  refusé) ;
+- avant la première lecture de la configuration dans Gladys (démarrage du
+  conteneur) : il est refusé, rien n'est envoyé (le jeton n'est pas encore
+  connu).
 
 Une extinction ou un hors gel reste gardé, aussi dans `/data` (un redémarrage
 du conteneur le renvoie en premier, dès la configuration lue), jusqu'à ce
@@ -87,7 +92,10 @@ appliqués, il reste gardé et affiché, sans nouvel envoi, jusqu'à une lecture
 qui le montre appliqué ou une commande plus récente. Une commande plus récente de la
 même cible, prise par la passerelle, le remplace. Un mouvement de volet
 (fermer, arrêter) est terminé dès que la passerelle l'a pris, et n'est jamais
-rejoué après un redémarrage.
+rejoué après un redémarrage. Une fermeture qui n'a pas atteint la passerelle
+n'est renvoyée qu'après une lecture du volet : fermé ou en train de se fermer,
+c'est fait ; lu plus ouvert qu'au clic deux fois de suite, il a été ouvert à
+la main entre-temps et la fermeture est abandonnée (jamais refermé par-dessus).
 
 **Désactivé par défaut** :
 
@@ -120,8 +128,10 @@ est relu après 5 et 20 secondes et son badge le signale en attendant.
 Avec les **mises à jour en direct** (par défaut), la passerelle envoie chaque
 changement par WebSocket ; la liste complète est relue toutes les 5 minutes.
 Sans elles, ou si la connexion est perdue, la liste est relue à l'**intervalle**
-choisi (60 s par défaut). Jamais plus vite : ni le bouton Scan, ni un
-redémarrage du conteneur ne relisent avant l'intervalle.
+choisi (60 s par défaut). Jamais plus vite : ni le bouton Scan, ni le bouton
+« Tester la connexion » (qui dit alors quand il pourra tester), ni un
+redémarrage du conteneur ne relisent avant l'intervalle après la dernière
+lecture.
 
 Un appui sur un bouton à bascule est vu seulement en direct. Le micrologiciel
 2.2.0 des boutons envoie chaque appui deux fois, à environ 1 s : un second

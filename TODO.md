@@ -61,8 +61,26 @@ Handoff document: what is done, what was decided, what comes next.
 - Rocker presses: live frames only, one click per press edge, a press within
   1.2 s of the previous one of the same function dropped (device firmware
   2.2.0 copies).
-- Test button: one real test per 10 s (else the last result); it lifts a
-  refused token and accepts a changed identity.
+- Test button: one real test per 10 s (else the last result), never a read
+  sooner than the interval after the last one (/data included); the token is
+  accepted only on a 2xx of the function list; it lifts a refused token and
+  accepts a changed identity.
+- Refused token: only a 401/403 of GET /functions/ (the reads, the Test
+  button). A 401/403 on a secondary route (scenes, socket, serial number,
+  read back, command, stop) is "not read" / "refused on this route": spaced
+  (scenes and socket doubling up to 1 h), never a block; a stop refused there
+  is kept and sent again at the stop pace, not counted.
+- A stop clicked before the first `getConfig()` (container start) is refused,
+  nothing sent: no token known yet (review r1, accepted with the /data gap).
+- A cover close not answered is sent again only after a read of the level:
+  100 or closer than at the click ends it; more open than at the click in two
+  reads in a row (opened by hand) drops it; a level unknown at the click is
+  never "changed elsewhere".
+- A stop refused 4 times (423) or not applied after 4 answered sends stays
+  kept and shown, without new sends, until a read shows it applied or a newer
+  command (review r1 M6, for the forum post).
+- Mutants: `scripts/mutants.mjs` (list and runner, one at a time, own temp
+  directory, process group killed at the deadline).
 - The gateway serves many clients (the app polls every 5 s): reads, commands
   (6 at most at once) and stops use their own connections; a stop never waits
   for a slot.

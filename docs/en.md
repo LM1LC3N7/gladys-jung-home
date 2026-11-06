@@ -72,7 +72,11 @@ says it) and sent as soon as it can be:
   token is saved or "Test the connection" succeeds;
 - no pinned certificate, or certificate changed: it leaves once the
   certificate is pinned or recognized again;
-- gateway unreachable: it is sent again every 5 seconds, with no time limit.
+- gateway unreachable, or the route refused (401/403) while the function list
+  still accepts the token: it is sent again every 5 seconds, with no time
+  limit (only a refusal of the function list is a refused token);
+- before the configuration is first read from Gladys (container start): it
+  is refused, nothing sent (the token is not known yet).
 
 A switch-off or a frost protection stays kept, also in `/data` (a restart of
 the container sends it first, as soon as the configuration is read), until a
@@ -83,7 +87,10 @@ After 4 refusals of the gateway (device
 locked, wind alarm) or 4 sends not applied, it stays kept and shown, with no
 new send, until a read shows it applied or a newer command. A newer command of the same target, taken by the gateway, replaces
 it. A cover move (close, stop) is done once the gateway took it, and is never
-replayed after a restart.
+replayed after a restart. A close that did not reach the gateway is sent
+again only after a read of the cover: closed or closing, it is done; read more
+open than when you clicked twice in a row, it was opened by hand meanwhile and
+the close is dropped (never closed over it).
 
 **Off by default**:
 
@@ -114,8 +121,9 @@ says so meanwhile.
 With **live updates** (the default), the gateway sends each change over a
 WebSocket; the full list is read again every 5 minutes. Without them, or when
 the connection is lost, the list is read at the chosen **interval** (60 s by
-default). Never faster: neither the Scan button nor a restart of the container
-reads before the interval.
+default). Never faster: neither the Scan button, nor the "Test the connection"
+button (which then says when it can test again), nor a restart of the
+container reads before the interval after the last read.
 
 A press of a rocker is seen live only. The 2.2.0 firmware of the buttons sends
 each press twice, about 1 s apart: a second press of the same button within

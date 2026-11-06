@@ -147,10 +147,10 @@ export const quantityKind = (dp) =>
 
 /** A command value of Gladys: a finite number, never null, '' nor a boolean. */
 function commandNumber(value) {
-  if (value === null || value === undefined || typeof value === 'boolean') return undefined;
-  if (typeof value === 'string' && value.trim() === '') return undefined;
-  const n = Number(value);
-  return Number.isFinite(n) ? n : undefined;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
+  // Strict decimal: no blank, hexadecimal, exponent nor surrounding space.
+  if (typeof value === 'string' && /^-?\d{1,9}(\.\d{1,6})?$/.test(value)) return Number(value);
+  return undefined;
 }
 
 export class Refusal extends Error {

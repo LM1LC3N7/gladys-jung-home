@@ -71,12 +71,14 @@ export function cleanReason(text, token) {
 }
 
 /** Retry-After (seconds or an HTTP date) -> ms, or undefined. */
-export function retryAfterOf(value, now = Date.now()) {
+export function retryAfterOf(value, serverDate) {
   if (value === undefined || value === null || value === '') return undefined;
-  const seconds = Number(value);
-  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
+  if (/^\d{1,9}$/.test(String(value).trim())) return Number(String(value).trim()) * 1000;
+  // An HTTP date is compared with the gateway's own Date header, never with
+  // the local clock; without a readable one, the default pause applies.
   const date = Date.parse(String(value));
-  return Number.isFinite(date) ? Math.max(0, date - now) : undefined;
+  const now = Date.parse(String(serverDate ?? ''));
+  return Number.isFinite(date) && Number.isFinite(now) ? Math.max(0, date - now) : undefined;
 }
 
 /**
@@ -300,7 +302,7 @@ export function parseAnswer({ status, headers = {}, body }, token) {
   if (status === 429) {
     throw new GatewayError('rate', 'too many requests (HTTP 429)', {
       ...at,
-      retryAfter: retryAfterOf(headers['retry-after']),
+      retryAfter: retryAfterOf(headers['retry-after'], headers.date),
     });
   }
   if (status === 404) throw new GatewayError('notfound', reason || 'not found (HTTP 404)', at);

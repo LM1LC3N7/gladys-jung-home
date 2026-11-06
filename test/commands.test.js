@@ -83,6 +83,7 @@ test('a stop pressed while the token is refused leaves when the Test button succ
   s.gw.setValue(PATCH_LIGHT, 'switch', 1, { push: false });
   const ack = await s.fire('idlight1', 'on', 0);
   assert.equal(ack.success, false);
+  await s.advance(61_000);
   const result = await within(s.app.testConnection(), 'the test');
   assert.match(result.en, /Connection OK/);
   await waitFor(

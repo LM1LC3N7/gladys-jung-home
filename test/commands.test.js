@@ -549,13 +549,22 @@ test('checked again right before the first byte: option, identity, deadline (aft
 });
 
 test('a cover close is never sent again on a read: the cover may have been moved since', async (t) => {
-  const s = await setup(t);
+  // Without the live socket: only the answer ends the close (no frame confirms it first).
+  const s = await setup(t, { config: { live_updates: false } });
   s.gw.latency = (r) => (r.method === 'GET' && r.path.endsWith('idblind1-001') ? 500 : 0);
+  // The read backs of the cover (not the frames nor the list) taken by the app.
+  let readBacks = 0;
+  const apply = s.app.applyDatapoint.bind(s.app);
+  s.app.applyDatapoint = (dp, mark, options) => {
+    if (dp.id === 'idblind1-001' && options === undefined) readBacks += 1;
+    return apply(dp, mark, options);
+  };
   const ack = await s.fire('idblind1', 'state', -1);
   assert.equal(ack.success, true, ackError(ack));
-  // Moved from the wall right after.
+  // Moved from the wall right after: the read back after the answer shows 50.
   s.gw.setValue('idblind1-001', 'level', 50);
-  await pause(700);
+  await waitFor(() => readBacks >= 1, 'the read back of the close', 6000);
+  await pause(300);
   for (let i = 0; i < 6; i += 1) {
     await s.advance(5000);
     await pause(20);

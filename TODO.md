@@ -56,29 +56,42 @@ Handoff document: what is done, what was decided, what comes next.
   not an on/off (reference, issue #121).
 - Reads: GET /functions/ at the interval (60 s), every 5 min with the live
   socket; the time of the last read in /data before it leaves; a restart, the
-  Test button or Scan never read sooner than the interval. Changing only the
-  options keeps the session (no new read).
+  Test button or Scan never read sooner than the interval (Scan then publishes
+  the Discovery again). `tick` alone times every read, the first one of a
+  session included (the separate first wait from /data was the same rule
+  twice: removed, review r3). Changing only the options keeps the session (no
+  new read); a new address or a new token reads at once.
 - Rocker presses: live frames only, one click per press edge, a press within
   1.2 s of the previous one of the same function dropped (device firmware
   2.2.0 copies).
 - Test button: one real test per 10 s (else the last result), never a read
   sooner than the interval after the last one (/data included), except while
-  the token is refused or another gateway answers (no read runs then); a read
-  it makes puts the planned read off (`tick` is a no-op too early); the token is
-  accepted only on a 2xx of the function list; it lifts a refused token and
-  accepts a changed identity.
+  the token is refused (no read runs then) or another gateway answers (reads
+  go on, its functions are not offered): each test then reads the list, at
+  most once per 10 s (review r3 M3, accepted). The token is accepted only on a
+  2xx of the function list; it lifts a refused token and accepts a changed
+  identity. The list it reads is the read of the session: taken at once
+  (online right after the test, review r3 I5) and the planned read put off to
+  the interval after it (`tick` is a no-op too early). During a 429 pause,
+  neither Test nor "Request access" sends a request (stops aside).
 - Refused token: only a 401/403 of GET /functions/ (the reads, the Test
   button). A 401/403 on a secondary route (scenes, socket, serial number,
   read back, command, stop) is "not read" / "refused on this route": spaced
   (scenes and socket doubling up to 1 h), never a block; a stop refused there
   is kept and sent again at the stop pace, not counted.
+- Another token saved while running is tried (the refusal kept in /data is
+  dropped): the 6-bit mark alone would take a new token for the refused one 1
+  time in 64. Across a restart only the mark tells (a token changed while the
+  container was stopped may then wait for the Test button, 1 time in 64).
 - A stop clicked before the first `getConfig()` (container start) is refused,
   nothing sent: no token known yet (review r1, accepted with the /data gap).
-- A cover close not answered: two quick retries (~250 ms, no read), then sent
-  again only after a read of the level:
+- A cover close not answered: two quick retries (~250 ms after the click, no
+  read), then sent again only after a read of the level, once per read (no
+  quick retries then):
   100 or closer than at the click ends it; more open than at the click in two
   reads in a row (opened by hand) drops it; a level unknown at the click is
-  never "changed elsewhere".
+  never "changed elsewhere". A hand opening within the 250 ms of the click,
+  or between a read and its send, cannot be seen (review r3, documented).
 - A stop refused 4 times (423) or not applied after 4 answered sends stays
   kept and shown, without new sends, until a read shows it applied or a newer
   command (review r1 M6, for the forum post).

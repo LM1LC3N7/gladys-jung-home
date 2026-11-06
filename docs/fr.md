@@ -93,11 +93,13 @@ qui le montre appliqué ou une commande plus récente. Une commande plus récent
 même cible, prise par la passerelle, le remplace. Un mouvement de volet
 (fermer, arrêter) est terminé dès que la passerelle l'a pris, et n'est jamais
 rejoué après un redémarrage. Une fermeture qui n'a pas atteint la passerelle
-est d'abord retentée deux fois en 250 ms environ ; ensuite, elle n'est renvoyée
-qu'après une lecture du volet : fermé ou en train de se fermer, c'est fait ;
-lu plus ouvert qu'au clic deux fois de suite, il a été ouvert à la main
-entre-temps et la fermeture est abandonnée (jamais refermé par-dessus, passé
-ces premières 250 ms).
+est d'abord retentée deux fois dans les 250 ms environ qui suivent votre clic
+(c'est encore votre clic : un volet ouvert à la main pendant ces 250 ms peut
+être refermé) ; ensuite, elle n'est renvoyée qu'après une lecture du volet, une
+fois par lecture : fermé ou en train de se fermer, c'est fait ; lu plus ouvert
+qu'au clic deux fois de suite, il a été ouvert à la main entre-temps et la
+fermeture est abandonnée. Une ouverture à la main entre cette lecture et
+l'envoi (quelques millisecondes) ne peut pas être vue.
 
 **Désactivé par défaut** :
 
@@ -130,13 +132,19 @@ est relu après 5 et 20 secondes et son badge le signale en attendant.
 Avec les **mises à jour en direct** (par défaut), la passerelle envoie chaque
 changement par WebSocket ; la liste complète est relue toutes les 5 minutes.
 Sans elles, ou si la connexion est perdue, la liste est relue à l'**intervalle**
-choisi (60 s par défaut). Jamais plus vite : ni le bouton Scan, ni le bouton
-« Tester la connexion » (qui dit alors quand il pourra tester), ni un
-redémarrage du conteneur ne relisent avant l'intervalle après la dernière
-lecture ; une lecture faite par le bouton Test repousse la lecture prévue à
-l'intervalle après elle. Tant que le jeton est refusé ou qu'une autre
-passerelle répond (aucune lecture ne tourne alors), le bouton Test essaie
-tout de suite, une fois par 10 secondes.
+choisi (60 s par défaut). Jamais plus vite : ni le bouton Scan (qui republie
+la Découverte sans relire), ni le bouton « Tester la connexion » (qui dit alors
+quand il pourra tester), ni un redémarrage du conteneur ne relisent avant
+l'intervalle après la dernière lecture ; une nouvelle adresse ou un nouveau
+jeton enregistré relit tout de suite. Une lecture faite par le bouton Test est
+la lecture de l'intégration : sa liste sert aussitôt (connectée dès le test
+réussi) et la lecture suivante vient à l'intervalle après elle. Tant que le
+jeton est refusé (aucune lecture ne tourne alors) ou qu'une autre passerelle
+répond (les lectures continuent, ses fonctions ne sont pas proposées), le
+bouton Test essaie tout de suite, une fois par 10 secondes, chaque essai
+lisant la liste des fonctions. Pendant une pause demandée par la passerelle
+(429), ni le bouton Test ni « Demander l'accès » n'envoient aucune requête ; seuls les
+arrêts partent.
 
 Un appui sur un bouton à bascule est vu seulement en direct. Le micrologiciel
 2.2.0 des boutons envoie chaque appui deux fois, à environ 1 s : un second

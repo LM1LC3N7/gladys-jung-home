@@ -70,10 +70,10 @@ export function cleanReason(text, token) {
     .slice(0, 120);
 }
 
-/** Retry-After (seconds or an HTTP date) -> ms, or undefined. */
+/** Retry-After (seconds, decimals accepted, or an HTTP date) -> ms, or undefined. */
 export function retryAfterOf(value, serverDate) {
   if (value === undefined || value === null || value === '') return undefined;
-  if (/^\d{1,9}(\.\d{1,3})?$/.test(String(value).trim())) {
+  if (/^\d{1,9}(\.\d+)?$/.test(String(value).trim())) {
     return Math.round(Number(String(value).trim()) * 1000);
   }
   // An HTTP date is compared with the gateway's own Date header, never with

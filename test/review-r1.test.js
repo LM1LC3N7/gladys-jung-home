@@ -1,8 +1,9 @@
 // -----------------------------------------------------------------------------
-// The points of review r1, each with its test: 401/403 of a secondary route
-// is not a refused token (I1); Scan and Test after a restart keep the pace
-// (I2); the guards whose mutants survived (I3); the minor points; a cover
-// close not reached is never re-closed over a hand opening.
+// The points of reviews r1 to r3, each with its test: 401/403 of a secondary
+// route is not a refused token (I1); Scan and Test after a restart keep the
+// pace (I2); the guards whose mutants survived (I3); the minor points; a cover
+// close not reached is never re-closed over a hand opening a read showed; the
+// list read by Test is the read of the session (r3 I5).
 // -----------------------------------------------------------------------------
 
 import { test } from 'node:test';
@@ -10,10 +11,12 @@ import assert from 'node:assert/strict';
 import { normalizeConfig, parseAddress } from '../src/config.js';
 import { retryAfterOf } from '../src/gateway.js';
 import { buildModel, functionsOf, scenesOf } from '../src/model.js';
+import { tokenMark } from '../src/store.js';
 import { createFakeGladys } from '@gladysassistant/integration-sdk/testing';
 import { certs, selfSigned } from './kit/certs.mjs';
 import {
   OTHER_TOKEN,
+  TOKEN,
   fakeGateway,
   fixtureFunctions,
   fixtureScenes,
@@ -69,7 +72,7 @@ test('I1: 403 on the serial number, a read back or a stop: never a refused token
   s.gw.replyFor = (r) =>
     r.path === '/config/parameter/system_serial' ? { status: 403, body: {} } : undefined;
   s.app.stop();
-  await within(s.app.start(s.raw, { fresh: true }), 'restart');
+  await within(s.app.start(s.raw), 'restart');
   await s.advance(61_000);
   await s.online();
   assert.equal(s.app.blocked, false);
@@ -171,7 +174,7 @@ test('I3: another gateway at the address: no state of it reaches the devices, no
   await s.flush();
   s.gw.serial = 'JH9999';
   s.app.stop();
-  await within(s.app.start(s.raw, { fresh: true }), 'restart');
+  await within(s.app.start(s.raw), 'restart');
   await s.advance(61_000);
   await s.online();
   assert.equal(s.app.identity.mismatch, 'snJH9999');
@@ -346,6 +349,9 @@ test('M5: a Retry-After date is compared with the Date of the answer, never the 
   assert.equal(retryAfterOf('Wed, 05 Nov 2025 12:10:00 GMT', undefined), undefined);
   assert.equal(retryAfterOf('120', undefined), 120_000);
   assert.equal(retryAfterOf('1.5', undefined), 1500, 'decimal seconds (r2)');
+  assert.equal(retryAfterOf('90.5', undefined), 90_500);
+  assert.equal(retryAfterOf('120.1234', undefined), 120_123, 'any number of decimals (r3)');
+  assert.equal(retryAfterOf(' 30.000001 ', undefined), 30_000);
   assert.equal(retryAfterOf('1e3', date), undefined);
 });
 
@@ -465,4 +471,232 @@ test('r2: a new token saved while running reads at once (another session)', asyn
     await s.advance(0);
     return s.gw.count('GET /functions/') > reads;
   }, 'the read with the new token');
+});
+
+// --- Review r3 -----------------------------------------------------------------------
+
+const until = (s, fn, what) =>
+  waitFor(async () => {
+    await s.advance(0);
+    return fn();
+  }, what);
+
+test('r3 I5: a Test that lifts a refused token takes its read: online at once, no second read', async (t) => {
+  const s = await setup(t, { config: { live_updates: false, poll_interval: 600 } });
+  s.gw.token = OTHER_TOKEN;
+  await s.advance(600_000);
+  await waitFor(() => s.app.blocked, 'refused by the function list');
+  assert.equal(s.app.online, false);
+  s.gw.setValue(LIGHT, 'switch', 1, { push: false });
+  const kept = await s.fire('idlight1', 'on', 0);
+  assert.equal(kept.success, false, 'kept while the token is refused');
+  s.gw.token = TOKEN;
+  const reads = s.gw.count('GET /functions/');
+  const result = await within(s.app.testConnection(), 'test');
+  assert.match(result.en, /Connection OK/);
+  await until(s, () => s.app.online, 'online right after the test');
+  assert.match(s.message(), /Connected/);
+  assert.equal(s.gw.count('GET /functions/'), reads + 1, 'the list of the test, read once');
+  await waitFor(() => s.gw.value(LIGHT, 'switch') === '0', 'the kept stop sent');
+  const ack = await s.fire('iddim1', 'brightness', 40);
+  assert.equal(ack.success, true, err(ack));
+  // The next read at the interval after the test's.
+  await s.advance(590_000);
+  await pause(50);
+  assert.equal(s.gw.count('GET /functions/'), reads + 1);
+  await s.advance(11_000);
+  await waitFor(() => s.gw.count('GET /functions/') === reads + 2, 'the read at the interval');
+});
+
+test('r3 I5: the first Test, pinning the certificate, takes its read: online at once', async (t) => {
+  const s = await setup(t, {
+    pinned: false,
+    memory: null,
+    connect: false,
+    config: { live_updates: false, poll_interval: 600 },
+  });
+  await within(s.gladys.connect(), 'connect');
+  await s.advance(0);
+  assert.match(s.message(), /not pinned/);
+  assert.equal(s.gw.requests.length, 0);
+  const result = await within(s.app.testConnection(), 'test');
+  assert.match(result.en, /Connection OK.*certificate pinned/);
+  await until(s, () => s.app.online, 'online right after the test');
+  assert.ok(s.fake.discoveredDevices.length > 0, 'the Discovery from the list of the test');
+  await s.advance(590_000);
+  await pause(50);
+  assert.equal(s.gw.count('GET /functions/'), 1, 'no second read before the interval');
+});
+
+test('r3 I5: a Test at the due time while connected: its list reaches the devices, read once', async (t) => {
+  const s = await setup(t, { config: { live_updates: false, poll_interval: 30 } });
+  s.clock.timers.clearTimeout(s.app.readTimer);
+  await s.advance(31_000);
+  s.gw.setValue(LIGHT, 'switch', 1, { push: false });
+  const reads = s.gw.count('GET /functions/');
+  const result = await within(s.app.testConnection(), 'test');
+  assert.match(result.en, /Connection OK/);
+  await s.flush();
+  assert.equal(s.lastState('idlight1', 'on'), 1, 'the value read by the test');
+  assert.equal(s.gw.count('GET /functions/'), reads + 1);
+});
+
+test('r3: a Test read that left before a command never undoes it', async (t) => {
+  const s = await setup(t, { config: { live_updates: false, poll_interval: 30 } });
+  s.clock.timers.clearTimeout(s.app.readTimer);
+  await s.advance(31_000);
+  // The list as it was when the request of the test came in, answered late.
+  let snapshot;
+  s.gw.latency = (r) => {
+    if (r.path !== '/functions/') return 0;
+    snapshot = structuredClone(s.gw.functions);
+    return 600;
+  };
+  s.gw.replyFor = (r) =>
+    r.path === '/functions/' && snapshot ? { status: 200, body: snapshot } : undefined;
+  const testing = s.app.testConnection();
+  await waitFor(() => snapshot, 'the read of the test sent');
+  const ack = await s.fire('iddim1', 'brightness', 40);
+  assert.equal(ack.success, true, err(ack));
+  assert.match((await within(testing, 'test')).en, /Connection OK/);
+  await s.flush();
+  assert.equal(s.lastState('iddim1', 'brightness'), 40);
+});
+
+test('r3: a Test that ends after another token was saved gives the new session nothing', async (t) => {
+  const s = await setup(t, { config: { live_updates: false } });
+  s.app.refuseToken();
+  // The old token accepted, slowly; the new one refused by the function list.
+  s.gw.latency = (r) => (r.path === '/functions/' && r.token === TOKEN ? 800 : 0);
+  s.gw.replyFor = (r) =>
+    r.path === '/functions/' && r.token === OTHER_TOKEN ? { status: 401, body: {} } : undefined;
+  const before = s.gw.count('GET /functions/');
+  const testing = s.app.testConnection();
+  await waitFor(() => s.gw.count('GET /functions/') > before, 'the read of the test sent');
+  await within(s.fake.configUpdated({ ...s.raw, api_token: OTHER_TOKEN }), 'config');
+  await until(s, () => s.app.blocked, 'the new token refused');
+  assert.match((await within(testing, 'test')).en, /Connection OK/);
+  await s.advance(0);
+  await pause(30);
+  assert.equal(s.app.blocked, true, 'the refusal of the new token stays');
+  assert.ok(s.store.data.refused);
+  assert.equal(s.app.online, false);
+});
+
+test('r3: a Test refused for an older token never marks the new one refused', async (t) => {
+  const s = await setup(t, { config: { live_updates: false } });
+  s.clock.timers.clearTimeout(s.app.readTimer);
+  await s.advance(61_000);
+  // The old token refused, slowly; the new one accepted.
+  s.gw.token = OTHER_TOKEN;
+  s.gw.latency = (r) => (r.path === '/functions/' && r.token === TOKEN ? 800 : 0);
+  const before = s.gw.count('GET /functions/');
+  const testing = s.app.testConnection();
+  await waitFor(() => s.gw.count('GET /functions/') > before, 'the read of the test sent');
+  await within(s.fake.configUpdated({ ...s.raw, api_token: OTHER_TOKEN }), 'config');
+  await until(s, () => s.app.online, 'the new token read');
+  assert.match((await within(testing, 'test')).en, /refused/);
+  await pause(30);
+  assert.equal(s.app.blocked, false);
+  assert.equal(s.store.data.refused ?? null, null);
+});
+
+test('r3: during a 429 pause, neither Test nor Request access sends anything', async (t) => {
+  const s = await setup(t, { config: { live_updates: false } });
+  s.gw.replyFor = (r) =>
+    r.path === '/functions/'
+      ? { status: 429, body: {}, headers: { 'retry-after': '600' } }
+      : undefined;
+  await s.advance(61_000);
+  await waitFor(() => s.app.paused(), 'paused');
+  s.gw.replyFor = () => undefined;
+  // The interval is over, the pause is not.
+  await s.advance(120_000);
+  const count = s.gw.requests.length;
+  const result = await within(s.app.testConnection(), 'test');
+  assert.match(result.en, /No test during the pause/);
+  const access = await within(s.app.requestAccess(), 'access');
+  assert.match(access.en, /no access request/);
+  await pause(50);
+  assert.equal(s.gw.requests.length, count, 'nothing sent');
+  // A stop still leaves.
+  s.gw.setValue(LIGHT, 'switch', 1, { push: false });
+  const ack = await s.fire('idlight1', 'on', 0);
+  assert.equal(ack.success, true, err(ack));
+});
+
+test('r3: a close sent again after a read leaves once for that read (no quick retries)', async (t) => {
+  const s = await setup(t);
+  s.gw.drop = (r) => r.method === 'PATCH';
+  const ack = s.fire('idblind1', 'state', -1);
+  for (let i = 0; i < 10; i += 1) {
+    await s.advance(100);
+    await pause(20);
+  }
+  await s.advance(3500);
+  assert.equal((await ack).success, false);
+  const sets = () => s.gw.sets('idblind1-001').length;
+  assert.equal(sets(), 3, 'the click and its two quick retries');
+  const reads = () => s.gw.count('GET /functions/idblind1/datapoints/idblind1-001');
+  const before = reads();
+  // The stop timer (5 s after the click): a read of the level, then one send.
+  await s.advance(500);
+  await waitFor(() => sets() === 4, 'sent again after the read');
+  assert.equal(reads(), before + 1);
+  for (let i = 0; i < 8; i += 1) {
+    await s.advance(50);
+    await pause(20);
+  }
+  assert.equal(sets(), 4, 'no quick retry after a read');
+});
+
+test('r3: an identity a Test accepts after another address was saved is not given to it', async (t) => {
+  const s = await setup(t, { config: { live_updates: false } });
+  const gw2 = await fakeGateway();
+  t.after(() => gw2.close());
+  s.gw.serial = 'JH4242';
+  s.app.identity = { ...s.app.identity, mismatch: 'snJH4242', verified: false };
+  // /data keeps the new identity slowly.
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const save = s.store.save.bind(s.store);
+  s.store.save = async (data) => {
+    if (data.identities?.[s.gw.address] === 'snJH4242') await gate;
+    return save(data);
+  };
+  const testing = s.app.testConnection();
+  await waitFor(() => s.app.memory.identities[s.gw.address] === 'snJH4242', 'the identity kept');
+  await within(
+    s.fake.configUpdated({
+      ...s.raw,
+      gateway_address: gw2.address,
+      certificate_fingerprint: gw2.fingerprint,
+    }),
+    'config',
+  );
+  await until(s, () => s.app.online, 'the new gateway read');
+  release();
+  assert.match((await within(testing, 'test')).en, /Connection OK/);
+  await s.advance(0);
+  await pause(30);
+  assert.equal(s.app.config.address, gw2.address);
+  assert.equal(s.app.identity.key, 'snJH0012345678', 'the identity of the gateway now configured');
+  assert.equal(s.app.identity.mismatch, undefined);
+});
+
+test('r3: a new token saved while running is tried, even when its 6-bit mark is the refused one', async (t) => {
+  const s = await setup(t, { config: { live_updates: false } });
+  s.gw.token = OTHER_TOKEN;
+  s.app.refuseToken();
+  // The 1-in-64 case: the mark of the new token equals the one kept for the refused token.
+  s.app.memory.refused.mark = tokenMark(s.app.memory.refused.salt, OTHER_TOKEN);
+  s.gw.setValue(LIGHT, 'switch', 1, { push: false });
+  await s.fire('idlight1', 'on', 0);
+  await within(s.fake.configUpdated({ ...s.raw, api_token: OTHER_TOKEN }), 'config');
+  assert.equal(s.app.blocked, false);
+  await waitFor(() => s.gw.value(LIGHT, 'switch') === '0', 'the kept stop sent with the new token');
+  await until(s, () => s.app.online, 'read with the new token');
+  assert.equal(s.store.data.refused ?? null, null);
 });

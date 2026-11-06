@@ -190,7 +190,7 @@ test('identity: learnt once, a weaker or missing answer is unreadable, another s
   s.gw.replyFor = (r) =>
     r.path === '/config/parameter/system_serial' ? { status: 500, body: {} } : undefined;
   s.app.stop();
-  await within(s.app.start(s.raw, { fresh: true }), 'restart');
+  await within(s.app.start(s.raw), 'restart');
   await s.advance(60_000);
   await s.online();
   assert.equal(s.app.identity.verified, false);
@@ -203,7 +203,7 @@ test('identity: learnt once, a weaker or missing answer is unreadable, another s
   s.gw.replyFor = () => undefined;
   s.gw.serial = null;
   s.app.stop();
-  await within(s.app.start(s.raw, { fresh: true }), 'restart');
+  await within(s.app.start(s.raw), 'restart');
   await s.advance(60_000);
   await s.online();
   assert.equal(s.app.identity.verified, false);
@@ -217,7 +217,7 @@ test('identity: learnt once, a weaker or missing answer is unreadable, another s
   // Another serial: commands refused, devices not offered under it.
   s.gw.serial = 'JH9999';
   s.app.stop();
-  await within(s.app.start(s.raw, { fresh: true }), 'restart');
+  await within(s.app.start(s.raw), 'restart');
   await s.advance(60_000);
   await s.online();
   assert.equal(s.app.identity.mismatch, 'snJH9999');
@@ -372,12 +372,19 @@ test('a device created long after the last read gets no stale value', async (t) 
   assert.equal(s.lastState('idlight1', 'on'), 0, 'a fresh value is sent');
 });
 
-test('Scan: never a read sooner than the interval', async (t) => {
+test('Scan: never a read sooner than the interval; inside it, the Discovery is published again', async (t) => {
   const s = await setup(t);
+  let published = 0;
+  const publish = s.gladys.publishDiscoveredDevices.bind(s.gladys);
+  s.gladys.publishDiscoveredDevices = (list) => {
+    published += 1;
+    return publish(list);
+  };
   const count = s.gw.count('GET /functions/');
   await within(s.fake.scanRequest(), 'scan');
   await pause(30);
   assert.equal(s.gw.count('GET /functions/'), count);
+  assert.equal(published, 1, 'the Discovery published again without a read');
   await s.advance(61_000);
   await within(s.fake.scanRequest(), 'scan');
   await waitFor(() => s.gw.count('GET /functions/') === count + 1, 'the read');

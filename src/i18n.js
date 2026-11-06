@@ -335,6 +335,11 @@ export const T = {
       'An access request is already waiting for your approval in the JUNG HOME app.',
       "Une demande d'accès attend déjà votre accord dans l'app JUNG HOME.",
     ),
+    paused: (min) =>
+      both(
+        `The gateway asked to slow down (429): no access request for about ${min} min. Nothing sent.`,
+        `La passerelle a demandé de ralentir (429) : pas de demande d'accès pendant environ ${min} min. Rien envoyé.`,
+      ),
     started: (pin, learnt) =>
       both(
         `${learnt ? `Certificate pinned (SHA-256 ${pin}). ` : ''}Now open the JUNG HOME app: Settings, Gateway, Access permissions, Open requests, and accept "Gladys" within 3 minutes. The status changes once accepted.`,
@@ -346,6 +351,11 @@ export const T = {
       both(
         `${learnt ? `Certificate pinned (SHA-256 ${pin}). ` : ''}${status.en} Not read again before the interval: next test possible in ${s} s.`,
         `${learnt ? `Certificat épinglé (SHA-256 ${pin}). ` : ''}${status.fr} Pas de nouvelle lecture avant l'intervalle : prochain test possible dans ${s} s.`,
+      ),
+    paused: (status, s, pin, learnt) =>
+      both(
+        `${learnt ? `Certificate pinned (SHA-256 ${pin}). ` : ''}${status.en} No test during the pause: next test possible in ${s} s.`,
+        `${learnt ? `Certificat épinglé (SHA-256 ${pin}). ` : ''}${status.fr} Pas de test pendant la pause : prochain test possible dans ${s} s.`,
       ),
     noToken: (pin, learnt) =>
       both(

@@ -40,7 +40,8 @@ export function selfSigned(cn = 'device') {
   const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
   const algorithm = seq(oid('1.2.840.113549.1.1.11'), Buffer.from([0x05, 0x00]));
   const serial = randomBytes(8);
-  serial[0] &= 0x7f;
+  // Positive and minimal (a leading 0x00 byte is refused: "illegal padding", 1 time in 256).
+  serial[0] = (serial[0] & 0x7f) | 0x40;
   const tbs = seq(
     tlv(0xa0, tlv(0x02, Buffer.from([0x02]))),
     tlv(0x02, serial),

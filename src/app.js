@@ -258,7 +258,7 @@ export class JungHomeApp {
   async configUpdated(raw = {}) {
     if (!this.started) {
       this.started = true;
-      await this.start(raw, { fresh: true });
+      await this.start(raw);
       return;
     }
     await this.applyConfig(raw, { reconnected: false });
@@ -308,14 +308,18 @@ export class JungHomeApp {
       return;
     }
     if (!reconnected) this.logger.info('JUNG HOME: configuration changed, starting again');
-    await this.start(raw, { fresh: true });
+    await this.start(raw);
   }
 
   /**
-   * `fresh`: a new configuration (a read may go at once); otherwise (container
-   * start) the first read waits for the interval after the last one (/data).
+   * A new session. The first read is `tick`'s to time: never sooner than the
+   * interval after the last read of this gateway (this run, or /data after a
+   * restart), nor during a pause; a new address or a new token reads at once.
+   * `read`: the function list the Test button has just read (with the
+   * identity it saw), taken as the read of this session (never a second read
+   * right after it).
    */
-  async start(raw = {}, { fresh = false } = {}) {
+  async start(raw = {}, { read } = {}) {
     this.stop();
     const generation = this.generation;
     this.raw = { ...(raw ?? {}) };
@@ -323,6 +327,17 @@ export class JungHomeApp {
     this.config = normalizeConfig(raw);
     await this.loadMemory();
     if (!this.current(generation)) return;
+    if (
+      previous.address !== undefined &&
+      previous.token !== this.config.token &&
+      this.memory.refused
+    ) {
+      // Another token saved while running is tried: the refusal kept in /data
+      // is an older token's (its 6-bit mark alone would take the new one for
+      // it 1 time in 64).
+      this.memory.refused = null;
+      this.saveSoon().catch(() => {});
+    }
     if (
       previous.address !== undefined &&
       (previous.address !== this.config.address || previous.token !== this.config.token)
@@ -338,7 +353,7 @@ export class JungHomeApp {
       this.lastValues.clear();
     }
     this.abort = new AbortController();
-    this.identity = {
+    this.identity = read?.identity ?? {
       key: this.storedIdentity(),
       verified: false,
       mismatch: undefined,
@@ -363,19 +378,17 @@ export class JungHomeApp {
       await this.showStatus();
       return;
     }
+    if (read) {
+      await this.takeRead(read.list, read.startMark);
+      if (this.current(generation)) this.afterRead(generation);
+      return;
+    }
     this.rebuild();
     await this.publishDevices();
     await this.showStatus();
     if (!this.current(generation)) return;
-    // Never a read sooner than the interval after the last one of this gateway
-    // (a restart, the Test button, a configuration saved unchanged); a new
-    // address or a new token reads at once.
-    const interval = this.config.pollInterval * 1000;
-    let wait = fresh ? 0 : this.firstWait();
-    if (previous.address === this.config.address && previous.token === this.config.token) {
-      wait = Math.max(wait, this.lastReadMono + interval - this.mono());
-    }
-    this.scheduleRead(generation, clamp(Math.max(wait, this.pauseLeft()), 0, TIMINGS.rateLimitMax));
+    // `tick` puts the read off to its time (interval after the last read, pause).
+    this.scheduleRead(generation, 0);
   }
 
   /** The reads, the live socket and the timers of this run end; a stop in flight goes on. */
@@ -423,16 +436,6 @@ export class JungHomeApp {
 
   paused() {
     return this.pauseLeft() > 0;
-  }
-
-  /** The wait before the first read after a container start, from /data. */
-  firstWait() {
-    const last = this.memory.lastReadAt;
-    if (last === null) return 0;
-    const interval = this.config.pollInterval * 1000;
-    // Written at most once a minute: the last read may be up to a minute later.
-    const due = last + TIMINGS.attemptWriteEvery + interval;
-    return clamp(due - this.now(), 0, interval);
   }
 
   // --- Pin, identity, token refusal ---------------------------------------------------
@@ -635,20 +638,7 @@ export class JungHomeApp {
       }
       if (!this.current(generation)) return;
       this.scenes = scenes;
-      this.adoptFunctions(list, startMark);
-      const wasOnline = this.online;
-      this.online = true;
-      this.failures = 0;
-      this.lastError = undefined;
-      this.pinError = undefined;
-      if (!wasOnline) {
-        this.logger.info(
-          `JUNG HOME: connected, ${this.model.counts.offered} functions, ${this.model.counts.scenes} scenes`,
-        );
-      }
-      await this.publishDevices();
-      await this.showStatus();
-      await this.publishAllTransports();
+      await this.takeRead(list, startMark);
     } catch (err) {
       // A certificate refused at the handshake: nothing reached the gateway,
       // so it does not count as a read (the pace starts from the last real one).
@@ -659,6 +649,29 @@ export class JungHomeApp {
       if (this.current(generation)) this.reading = false;
     }
     if (!this.current(generation)) return;
+    this.afterRead(generation);
+  }
+
+  /** A function list read (by the loop or the Test button): model, states, online, Discovery. */
+  async takeRead(list, startMark) {
+    this.adoptFunctions(list, startMark);
+    const wasOnline = this.online;
+    this.online = true;
+    this.failures = 0;
+    this.lastError = undefined;
+    this.pinError = undefined;
+    if (!wasOnline) {
+      this.logger.info(
+        `JUNG HOME: connected, ${this.model.counts.offered} functions, ${this.model.counts.scenes} scenes`,
+      );
+    }
+    await this.publishDevices();
+    await this.showStatus();
+    await this.publishAllTransports();
+  }
+
+  /** After a read: the next one at the interval; the live socket opened when wanted. */
+  afterRead(generation) {
     this.scheduleRead(generation, this.readInterval());
     if (
       this.config.live &&
@@ -1431,12 +1444,13 @@ export class JungHomeApp {
       return guard.inFlight;
     }
     if (!this.guardSendable(guard)) return Promise.resolve();
+    // A close sent again after a read of the cover leaves once for that read,
+    // without quick retries: the cover may be opened by hand right after it.
+    const quick = guard.close && guard.needRead ? [] : TIMINGS.stopQuickRetries;
     guard.inFlight = (async () => {
-      for (let i = 0; i <= TIMINGS.stopQuickRetries.length; i += 1) {
+      for (let i = 0; i <= quick.length; i += 1) {
         if (i > 0) {
-          await new Promise((resolve) =>
-            this.timers.setTimeout(resolve, TIMINGS.stopQuickRetries[i - 1]),
-          );
+          await new Promise((resolve) => this.timers.setTimeout(resolve, quick[i - 1]));
           if (!this.guardSendable(guard)) return;
         }
         const outcome = await this.sendGuardOnce(guard);
@@ -1646,8 +1660,9 @@ export class JungHomeApp {
    * A close that did not reach the gateway, before it is sent again: the level
    * is read. Closed: done. Closer than when clicked: moving, taken. More open
    * than when clicked in two reads in a row: opened elsewhere, the close is
-   * dropped (never re-closed over a hand opening). Otherwise sent again. A
-   * read that fails sends nothing (the next tick reads again).
+   * dropped (never re-closed over a hand opening a read showed). Otherwise
+   * sent again, once for this read. A read that fails sends nothing (the
+   * stop timer reads again).
    */
   async checkClose(guard) {
     if (guard.reading || guard.inFlight || !this.guardSendable(guard)) return;
@@ -1747,6 +1762,8 @@ export class JungHomeApp {
     const target = this.savedTarget();
     if (target.error) return target.error;
     if (this.registering) return T.register.busy;
+    // A 429 pause holds every request but the stops, an access request too.
+    if (this.paused()) return T.register.paused(Math.ceil(this.pauseLeft() / 60_000));
     let pin =
       target.key === this.config.address && this.config.fingerprint
         ? this.config.fingerprint
@@ -1779,7 +1796,7 @@ export class JungHomeApp {
         if (this.memoryState === 'loaded') this.saveSoon().catch(() => {});
         await this.gladys.setConfig({ api_token: token });
         this.logger.info('JUNG HOME: access granted by the gateway, token saved');
-        await this.start({ ...this.raw, api_token: token }, { fresh: true });
+        await this.start({ ...this.raw, api_token: token });
       })
       .catch((err) => {
         this.logger.warn(`JUNG HOME: access request ended (${err?.message ?? 'error'})`);
@@ -1811,6 +1828,9 @@ export class JungHomeApp {
   async runTest() {
     const c = this.config;
     if (c.error) return T.configError(c.error);
+    // The session the test speaks for: another configuration saved meanwhile
+    // gets nothing from it (token, identity, list).
+    const generation = this.generation;
     const target = { host: c.host, port: c.port, key: c.address };
     let pin = this.pin();
     let learnt = false;
@@ -1822,6 +1842,11 @@ export class JungHomeApp {
         learnt = true;
         // The stops kept for want of a pin leave first, before the test reads.
         this.flushGuards();
+      }
+      // A 429 pause holds every request but the stops, the Test button's too.
+      if (this.paused()) {
+        const { message } = this.statusText();
+        return T.test.paused(message, Math.ceil(this.pauseLeft() / 1000), pin, learnt);
       }
       const client = createGateway({
         host: c.host,
@@ -1836,20 +1861,31 @@ export class JungHomeApp {
       }
       // Never a read sooner than the interval after the last one (this run or,
       // from /data, the previous one): the last result is said instead. While
-      // the token is refused or another gateway answers, no read runs: Test
-      // may then try (once per 10 s, the Test spacing).
+      // the token is refused (no read runs then) or another gateway answers
+      // (reads go on, its functions are not offered), Test may try at once
+      // (once per 10 s, the Test spacing).
       const wait = this.lastReadMono + c.pollInterval * 1000 - this.mono();
       if (wait > 0 && !this.blocked && !this.identity.mismatch) {
         const { message } = this.statusText();
         return T.test.waiting(message, Math.ceil(wait / 1000), pin, learnt);
       }
       this.noteAttempt();
+      // Marked when it leaves: a command sent after it is never undone by it.
+      const startMark = ++this.counter;
       const version = await client.version({ timeout: TIMINGS.readTimeout });
       // The token is accepted only on an answer of the function list (2xx).
       const list = await client.functions({ timeout: TIMINGS.readTimeout });
       if (!Array.isArray(list)) throw new GatewayError('format', 'the function list is not a list');
       const identity = { ...this.identity };
-      await this.readIdentity(client, this.generation);
+      await this.readIdentity(client, generation);
+      const ok = T.test.ok({
+        pin,
+        learnt,
+        api: typeof version?.api_version === 'string' ? version.api_version.slice(0, 12) : '',
+        release:
+          typeof version?.version_release === 'string' ? version.version_release.slice(0, 12) : '',
+      });
+      if (!this.current(generation)) return ok;
       const seen = this.identity;
       if (seen.mismatch && this.memoryState === 'loaded') {
         this.memory.identities[c.address] = seen.mismatch;
@@ -1859,6 +1895,7 @@ export class JungHomeApp {
           this.identity = identity;
           return T.dataUnreadable;
         }
+        if (!this.current(generation)) return ok;
         this.identity = {
           key: seen.mismatch,
           verified: true,
@@ -1874,20 +1911,20 @@ export class JungHomeApp {
           'JUNG HOME: token accepted again (Test button), the kept stops leave first',
         );
       }
+      // The list just read is the read of the session: taken at once (online
+      // now, never "Connecting..." until the next interval), and never read
+      // again right after it.
+      const read = { list, startMark, identity: { ...this.identity } };
       if (wasBlocked || learnt || seen.mismatch || !this.online) {
-        this.background(this.start(this.raw, { fresh: true }));
+        this.background(this.start(this.raw, { read }));
+      } else {
+        this.background(this.takeRead(list, startMark));
       }
-      return T.test.ok({
-        pin,
-        learnt,
-        api: typeof version?.api_version === 'string' ? version.api_version.slice(0, 12) : '',
-        release:
-          typeof version?.version_release === 'string' ? version.version_release.slice(0, 12) : '',
-      });
+      return ok;
     } catch (err) {
       if (err?.kind === 'rate') this.pause(err);
-      if (err?.kind === 'auth') this.refuseToken();
-      if (err?.kind === 'pin') this.pinError = err;
+      if (err?.kind === 'auth' && this.current(generation)) this.refuseToken();
+      if (err?.kind === 'pin' && this.current(generation)) this.pinError = err;
       if (!(err instanceof GatewayError)) this.logger.error('JUNG HOME: test failed', err);
       return T.failure(err);
     }
@@ -1936,7 +1973,7 @@ export class JungHomeApp {
       return T.pinNotKept(fp);
     }
     this.logger.info('JUNG HOME: new certificate trusted (two clicks)');
-    this.background(this.start(this.raw, { fresh: true }));
+    this.background(this.start(this.raw));
     return T.trust.done(fp);
   }
 }

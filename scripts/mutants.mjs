@@ -251,7 +251,7 @@ export const MUTANTS = [
   [
     'I2 test pace',
     'src/app.js',
-    '      if (wait > 0) {\n        const { message } = this.statusText();',
+    '      if (wait > 0 && !this.blocked && !this.identity.mismatch) {\n        const { message } = this.statusText();',
     '      if (false) {\n        const { message } = this.statusText();',
     [R],
   ],
@@ -324,7 +324,28 @@ export const MUTANTS = [
     'src/app.js',
     '        learnt = true;\n        // The stops kept for want of a pin leave first, before the test reads.\n        this.flushGuards();',
     '        learnt = true;',
-    [A, C],
+    [R],
+  ],
+  [
+    'r2 tick early',
+    'src/app.js',
+    '    if (early > 0) {\n      this.scheduleRead(generation, early);\n      return;\n    }',
+    '',
+    [R],
+  ],
+  [
+    'r2 Test when refused',
+    'src/app.js',
+    'if (wait > 0 && !this.blocked && !this.identity.mismatch) {',
+    'if (wait > 0) {',
+    [R],
+  ],
+  [
+    'r2 new token reads at once',
+    'src/app.js',
+    '      this.lastReadMono = -Infinity;\n    }\n    if (previous.address !== this.config.address) {',
+    '    }\n    if (previous.address !== this.config.address) {',
+    [R],
   ],
 ];
 

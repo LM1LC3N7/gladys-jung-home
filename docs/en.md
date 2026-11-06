@@ -87,10 +87,11 @@ After 4 refusals of the gateway (device
 locked, wind alarm) or 4 sends not applied, it stays kept and shown, with no
 new send, until a read shows it applied or a newer command. A newer command of the same target, taken by the gateway, replaces
 it. A cover move (close, stop) is done once the gateway took it, and is never
-replayed after a restart. A close that did not reach the gateway is sent
-again only after a read of the cover: closed or closing, it is done; read more
-open than when you clicked twice in a row, it was opened by hand meanwhile and
-the close is dropped (never closed over it).
+replayed after a restart. A close that did not reach the gateway is first
+tried again twice within about 250 ms; after that, it is sent again only after
+a read of the cover: closed or closing, it is done; read more open than when
+you clicked twice in a row, it was opened by hand meanwhile and the close is
+dropped (never closed over it, past those first 250 ms).
 
 **Off by default**:
 
@@ -123,7 +124,10 @@ WebSocket; the full list is read again every 5 minutes. Without them, or when
 the connection is lost, the list is read at the chosen **interval** (60 s by
 default). Never faster: neither the Scan button, nor the "Test the connection"
 button (which then says when it can test again), nor a restart of the
-container reads before the interval after the last read.
+container reads before the interval after the last read; a read made by the
+Test button puts the next planned read off to the interval after it. While the
+token is refused or another gateway answers (no read runs then), the Test
+button tries at once, once per 10 seconds.
 
 A press of a rocker is seen live only. The 2.2.0 firmware of the buttons sends
 each press twice, about 1 s apart: a second press of the same button within

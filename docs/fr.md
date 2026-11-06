@@ -93,9 +93,11 @@ qui le montre appliqué ou une commande plus récente. Une commande plus récent
 même cible, prise par la passerelle, le remplace. Un mouvement de volet
 (fermer, arrêter) est terminé dès que la passerelle l'a pris, et n'est jamais
 rejoué après un redémarrage. Une fermeture qui n'a pas atteint la passerelle
-n'est renvoyée qu'après une lecture du volet : fermé ou en train de se fermer,
-c'est fait ; lu plus ouvert qu'au clic deux fois de suite, il a été ouvert à
-la main entre-temps et la fermeture est abandonnée (jamais refermé par-dessus).
+est d'abord retentée deux fois en 250 ms environ ; ensuite, elle n'est renvoyée
+qu'après une lecture du volet : fermé ou en train de se fermer, c'est fait ;
+lu plus ouvert qu'au clic deux fois de suite, il a été ouvert à la main
+entre-temps et la fermeture est abandonnée (jamais refermé par-dessus, passé
+ces premières 250 ms).
 
 **Désactivé par défaut** :
 
@@ -131,7 +133,10 @@ Sans elles, ou si la connexion est perdue, la liste est relue à l'**intervalle*
 choisi (60 s par défaut). Jamais plus vite : ni le bouton Scan, ni le bouton
 « Tester la connexion » (qui dit alors quand il pourra tester), ni un
 redémarrage du conteneur ne relisent avant l'intervalle après la dernière
-lecture.
+lecture ; une lecture faite par le bouton Test repousse la lecture prévue à
+l'intervalle après elle. Tant que le jeton est refusé ou qu'une autre
+passerelle répond (aucune lecture ne tourne alors), le bouton Test essaie
+tout de suite, une fois par 10 secondes.
 
 Un appui sur un bouton à bascule est vu seulement en direct. Le micrologiciel
 2.2.0 des boutons envoie chaque appui deux fois, à environ 1 s : un second

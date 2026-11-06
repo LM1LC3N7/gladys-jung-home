@@ -323,6 +323,13 @@ export class JungHomeApp {
     this.config = normalizeConfig(raw);
     await this.loadMemory();
     if (!this.current(generation)) return;
+    if (
+      previous.address !== undefined &&
+      (previous.address !== this.config.address || previous.token !== this.config.token)
+    ) {
+      // Another gateway or another token, saved while running: read at once.
+      this.lastReadMono = -Infinity;
+    }
     if (previous.address !== this.config.address) {
       this.functions = new Map();
       this.scenes = [];
@@ -591,6 +598,13 @@ export class JungHomeApp {
       this.scheduleRead(generation, this.pauseLeft());
       return;
     }
+    // Never sooner than the interval after the last read, whoever made it
+    // (the Test button reads too): put off to its due time.
+    const early = this.lastReadMono + this.config.pollInterval * 1000 - this.mono();
+    if (early > 0) {
+      this.scheduleRead(generation, early);
+      return;
+    }
     this.reading = true;
     const client = this.sessionClient();
     const previousRead = this.lastReadMono;
@@ -710,7 +724,7 @@ export class JungHomeApp {
   /**
    * A request that failed on a side path (read back, command, scene): a 429
    * pauses. A 401/403 there is never a refused token: only the function list
-   * decides, so its next read is brought forward (never sooner than allowed).
+   * decides, at its next read (at the interval, never brought forward).
    */
   sideError(err) {
     if (err?.kind === 'rate') this.pause(err);
@@ -1821,9 +1835,11 @@ export class JungHomeApp {
         return T.test.noToken(pin, learnt);
       }
       // Never a read sooner than the interval after the last one (this run or,
-      // from /data, the previous one): the last result is said instead.
+      // from /data, the previous one): the last result is said instead. While
+      // the token is refused or another gateway answers, no read runs: Test
+      // may then try (once per 10 s, the Test spacing).
       const wait = this.lastReadMono + c.pollInterval * 1000 - this.mono();
-      if (wait > 0) {
+      if (wait > 0 && !this.blocked && !this.identity.mismatch) {
         const { message } = this.statusText();
         return T.test.waiting(message, Math.ceil(wait / 1000), pin, learnt);
       }

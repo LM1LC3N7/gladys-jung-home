@@ -345,6 +345,7 @@ test('M5: a Retry-After date is compared with the Date of the answer, never the 
   assert.equal(retryAfterOf('Wed, 05 Nov 2025 12:10:00 GMT', date), 600_000);
   assert.equal(retryAfterOf('Wed, 05 Nov 2025 12:10:00 GMT', undefined), undefined);
   assert.equal(retryAfterOf('120', undefined), 120_000);
+  assert.equal(retryAfterOf('1.5', undefined), 1500, 'decimal seconds (r2)');
   assert.equal(retryAfterOf('1e3', date), undefined);
 });
 
@@ -416,4 +417,52 @@ test('a stop kept for want of a pin leaves first once Test pins the certificate'
   await within(s.app.testConnection(), 'test');
   await waitFor(() => s.gw.value(LIGHT, 'switch') === '0', 'the stop sent');
   assert.equal(s.gw.requests[0].method, 'PATCH', 'before the test reads');
+});
+
+// --- Review r2 -----------------------------------------------------------------------
+
+test('r2 I4: a read made by Test puts off the planned read to the interval after it', async (t) => {
+  const s = await setup(t, { config: { live_updates: false, poll_interval: 30 } });
+  const reads = () => s.gw.count('GET /functions/');
+  // The planned read is late (as when Test is clicked right at its due time).
+  s.clock.timers.clearTimeout(s.app.readTimer);
+  await s.advance(31_000);
+  const before = reads();
+  const result = await within(s.app.testConnection(), 'test');
+  assert.match(result.en, /Connection OK/);
+  assert.equal(reads(), before + 1);
+  s.app.scheduleRead(s.app.generation, 0);
+  await s.advance(0);
+  await pause(50);
+  assert.equal(reads(), before + 1, 'the planned read waits for the interval');
+  await s.advance(29_000);
+  await pause(50);
+  assert.equal(reads(), before + 1);
+  await s.advance(1500);
+  await waitFor(() => reads() === before + 2, 'the next read at the interval');
+});
+
+test('r2: while the token is refused or another gateway answers, Test tries at once (10 s spacing)', async (t) => {
+  const s = await setup(t);
+  s.app.refuseToken();
+  let result = await within(s.app.testConnection(), 'test');
+  assert.match(result.en, /Connection OK/);
+  assert.equal(s.app.blocked, false);
+  s.gw.serial = 'JH4242';
+  s.app.identity = { ...s.app.identity, mismatch: 'snJH4242', verified: false };
+  await s.advance(10_001);
+  result = await within(s.app.testConnection(), 'test');
+  assert.match(result.en, /Connection OK/);
+  assert.equal(s.store.data.identities[s.gw.address], 'snJH4242');
+});
+
+test('r2: a new token saved while running reads at once (another session)', async (t) => {
+  const s = await setup(t);
+  const reads = s.gw.count('GET /functions/');
+  s.gw.token = OTHER_TOKEN;
+  await within(s.fake.configUpdated({ ...s.raw, api_token: OTHER_TOKEN }), 'config');
+  await waitFor(async () => {
+    await s.advance(0);
+    return s.gw.count('GET /functions/') > reads;
+  }, 'the read with the new token');
 });

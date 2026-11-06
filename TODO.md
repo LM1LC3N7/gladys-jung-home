@@ -62,7 +62,9 @@ Handoff document: what is done, what was decided, what comes next.
   1.2 s of the previous one of the same function dropped (device firmware
   2.2.0 copies).
 - Test button: one real test per 10 s (else the last result), never a read
-  sooner than the interval after the last one (/data included); the token is
+  sooner than the interval after the last one (/data included), except while
+  the token is refused or another gateway answers (no read runs then); a read
+  it makes puts the planned read off (`tick` is a no-op too early); the token is
   accepted only on a 2xx of the function list; it lifts a refused token and
   accepts a changed identity.
 - Refused token: only a 401/403 of GET /functions/ (the reads, the Test
@@ -72,7 +74,8 @@ Handoff document: what is done, what was decided, what comes next.
   is kept and sent again at the stop pace, not counted.
 - A stop clicked before the first `getConfig()` (container start) is refused,
   nothing sent: no token known yet (review r1, accepted with the /data gap).
-- A cover close not answered is sent again only after a read of the level:
+- A cover close not answered: two quick retries (~250 ms, no read), then sent
+  again only after a read of the level:
   100 or closer than at the click ends it; more open than at the click in two
   reads in a row (opened by hand) drops it; a level unknown at the click is
   never "changed elsewhere".

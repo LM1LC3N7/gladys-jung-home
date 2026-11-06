@@ -73,7 +73,9 @@ export function cleanReason(text, token) {
 /** Retry-After (seconds or an HTTP date) -> ms, or undefined. */
 export function retryAfterOf(value, serverDate) {
   if (value === undefined || value === null || value === '') return undefined;
-  if (/^\d{1,9}$/.test(String(value).trim())) return Number(String(value).trim()) * 1000;
+  if (/^\d{1,9}(\.\d{1,3})?$/.test(String(value).trim())) {
+    return Math.round(Number(String(value).trim()) * 1000);
+  }
   // An HTTP date is compared with the gateway's own Date header, never with
   // the local clock; without a readable one, the default pause applies.
   const date = Date.parse(String(value));

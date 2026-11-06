@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-06
+
 ### Added
 
 - JUNG HOME gateway over its local REST API and WebSocket: lights, dimmers,
@@ -25,3 +27,6 @@ the notes of the version's GitHub Release.
   switch-off or a frost protection kept in /data until read back applied.
 - Sockets switched on only once declared safe; heating setpoints (5 to 30 °C)
   and JUNG HOME scenes off by default.
+
+[Unreleased]: https://github.com/LM1LC3N7/gladys-jung-home/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/LM1LC3N7/gladys-jung-home/releases/tag/v0.1.1

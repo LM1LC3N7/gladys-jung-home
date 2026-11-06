@@ -1,6 +1,6 @@
 {
   "name": "gladys-jung-home",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Gladys Assistant external integration for JUNG HOME installations, through the local API of the JUNG HOME gateway: lights, dimmers, covers, sockets, room thermostats, rocker buttons, sensors and scenes; stops never held back, certificate pinned. Unofficial, not affiliated with JUNG.",
   "type": "module",

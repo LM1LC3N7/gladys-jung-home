@@ -19,7 +19,7 @@
     "node": ">=22"
   },
   "dependencies": {
-    "@gladysassistant/integration-sdk": "^0.16.0",
+    "@gladysassistant/integration-sdk": "^0.16.1",
     "ws": "^8.23.0"
   },
   "devDependencies": {
